@@ -222,3 +222,13 @@ facts/
 subs/
 .env.*
 !.env.example
+# Données EDGAR — volumineuses et retéléchargeables
+data/
+facts/
+subs/
+*.idx
+*.zip
+
+# Scripts jetables de vérification
+check.py
+diag.py
