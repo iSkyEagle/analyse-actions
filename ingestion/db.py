@@ -227,3 +227,66 @@ def prune_price_history(cn, company_id: int, years: int) -> int:
                   "and ym < (current_date - make_interval(years => %s))",
                   (company_id, years))
         return c.rowcount
+
+
+# =============================================================================
+# Sélection et état de fraîcheur
+# =============================================================================
+MAPPABLE = ("standard", "financial", "reit")
+
+
+def select_universe(cn, in_universe: bool = True, stale_first: Optional[str] = None,
+                    limit: Optional[int] = None, mappable_only: bool = True) -> list:
+    """
+    Retourne [(company_id, cik, ticker, sic, mapping_profile, history_years)].
+
+    `stale_first` prend 'fundamentals' ou 'prices' : le tri place en tête les sociétés
+    jamais traitées puis les plus anciennes. C'est ce qui rend un lot interrompu
+    reprenable sans état externe — le curseur est la donnée elle-même.
+    """
+    where = ["true"]
+    if in_universe:
+        where.append("in_universe")
+    if mappable_only:
+        where.append("mapping_profile in %(mappable)s")
+    order = ""
+    if stale_first in ("fundamentals", "prices"):
+        order = f"order by {stale_first}_refreshed_at asc nulls first, company_id"
+    sql = (f"select company_id, cik, ticker, sic, mapping_profile::text, history_years "
+           f"from companies where {' and '.join(where)} {order} "
+           f"{'limit %(limit)s' if limit else ''}")
+    with cn.cursor() as c:
+        c.execute(sql, {"mappable": MAPPABLE, "limit": limit})
+        return c.fetchall()
+
+
+def mark_out_of_scope(cn, ticker: str, profile: str) -> None:
+    """
+    Persiste le profil hors périmètre remonté par out_of_scope(). Sans ça, une société
+    IFRS reste marquée 'standard' et n'est écartée de l'univers que par accident
+    d'absence de capitalisation — un filtre juste pour une mauvaise raison.
+    """
+    with cn.cursor() as c:
+        c.execute("update companies set mapping_profile = %s::mapping_profile_t, "
+                  "in_universe = false, updated_at = now() where ticker = %s",
+                  (profile, ticker))
+
+
+def mark_refreshed(cn, kind: str, ids: Iterable, on: Optional[date] = None) -> int:
+    """kind = 'fundamentals' (clé cik) ou 'prices' (clé company_id)."""
+    col = {"fundamentals": ("fundamentals_refreshed_at", "cik"),
+           "prices": ("prices_refreshed_at", "company_id")}[kind]
+    ids = list(ids)
+    if not ids:
+        return 0
+    with cn.cursor() as c:
+        c.execute(f"update companies set {col[0]} = %s where {col[1]} = any(%s)",
+                  (on or date.today(), ids))
+        return c.rowcount
+
+
+def price_coverage(cn) -> dict:
+    """{company_id: (premier_mois, dernier_mois)} — base du backfill différencié."""
+    with cn.cursor() as c:
+        c.execute("select company_id, min(ym), max(ym) from prices group by company_id")
+        return {r[0]: (r[1], r[2]) for r in c.fetchall()}
