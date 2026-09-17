@@ -1,0 +1,41 @@
+# Cours quotidiens, après clôture US.
+#
+# 23:30 UTC du lundi au vendredi : 18:30 ET en hiver, 19:30 ET en été, soit dans les
+# deux cas après la clôture et après que yfinance a consolidé la séance. Le cron étant
+# en UTC, cet horaire évite d'avoir à suivre les changements d'heure américains.
+#
+# Ce job maintient aussi le projet Supabase éveillé : un projet gratuit se met en pause
+# après une semaine d'inactivité.
+name: Cours quotidiens
+
+on:
+  schedule:
+    - cron: "30 23 * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  # Les jobs ne doivent jamais se chevaucher : l'instance Supabase est en nano et
+  # sature sous charge concurrente.
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  cours:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Ingestion des cours
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python -m jobs.ingest_prices --mode daily

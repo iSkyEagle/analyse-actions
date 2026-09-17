@@ -186,7 +186,7 @@ def enrich_with_sic(provider, issuers, run=None, limit: Optional[int] = None) ->
                 run.fail_provider(e, ticker=i.ticker, cik=i.cik)
             continue
         if sic:
-            object.__setattr__(i, "sic", sic)
+            i.sic = sic
             done += 1
     return done
 
@@ -195,11 +195,21 @@ def enrich_with_sic(provider, issuers, run=None, limit: Optional[int] = None) ->
 # Passe B — SQL pur, aucun appel réseau
 # =============================================================================
 FINALIZE_SQL = """
-with fenetre as (
+with recent as (
+    -- borne sur prices.ym avant dépliage : la vue ne pousse pas le prédicat dans les
+    -- tableaux, et sans ça toute la profondeur d'historique serait dépliée
+    select company_id, ym, d, c, v from prices
+    where ym >= date_trunc('month', current_date - interval '3 months')::date
+),
+seances as (
+    select r.company_id, (r.ym + (t.day - 1))::date as dt, t.close_adj, t.volume
+    from recent r, unnest(r.d, r.c, r.v) as t(day, close_adj, volume)
+),
+fenetre as (
     select company_id,
            percentile_cont(0.5) within group (order by close_adj * volume) as dv_median,
            count(*) as n_seances
-    from prices_daily
+    from seances
     where dt >= current_date - interval '3 months'
     group by company_id
 )
@@ -221,6 +231,17 @@ from fenetre f
 where f.company_id = c.company_id
 """
 
+# Une société sans aucune séance sur trois mois n'apparaît pas dans `fenetre` et ne
+# serait donc jamais mise à jour : elle garderait un in_universe périmé. Radiée ou
+# suspendue, elle doit sortir.
+DROP_SILENT_SQL = """
+update companies c set in_universe = false, updated_at = now()
+where c.in_universe
+  and not exists (
+      select 1 from prices p where p.company_id = c.company_id
+        and p.ym >= date_trunc('month', current_date - interval '3 months')::date)
+"""
+
 
 def finalize_universe(cn, min_cap: float = MIN_MARKET_CAP,
                       min_dv: float = MIN_DOLLAR_VOLUME_3M,
@@ -234,6 +255,8 @@ def finalize_universe(cn, min_cap: float = MIN_MARKET_CAP,
         c.execute(FINALIZE_SQL, {"min_cap": min_cap, "min_dv": min_dv,
                                  "display_floor": display_floor})
         touched = c.rowcount
+        c.execute(DROP_SILENT_SQL)
+        sorties = c.rowcount
         c.execute("""
             select count(*) filter (where in_universe)                                as retenus,
                    count(*) filter (where in_universe and market_cap >= %s)           as au_dessus_seuil,
@@ -246,4 +269,5 @@ def finalize_universe(cn, min_cap: float = MIN_MARKET_CAP,
         k = ("retenus", "au_dessus_seuil", "hors_capi", "hors_volume", "qualite_faible")
         stats = dict(zip(k, c.fetchone()))
     stats["lignes_evaluees"] = touched
+    stats["sorties_sans_cotation"] = sorties
     return stats

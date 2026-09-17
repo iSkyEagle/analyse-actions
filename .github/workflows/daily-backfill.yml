@@ -1,0 +1,45 @@
+# Approfondissement progressif de l'historique.
+#
+# Le backfill est borné à 500 sociétés par passage, délibérément. Un passage complet
+# sur 4 500 sociétés à cinq ou dix ans écrase l'instance nano — c'est ce qui a saturé
+# la base en conditions réelles. À ce rythme, l'univers atteint sa profondeur visée en
+# une dizaine de jours, puis le job devient un no-op : `plan_backfill` n'inscrit que
+# les sociétés dont l'historique est incomplet.
+#
+# Horaire décalé de six heures par rapport aux cours, pour ne jamais se superposer.
+name: Backfill des cours
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Nombre de sociétés à compléter"
+        required: false
+        default: "500"
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Complétion de l'historique
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python -m jobs.ingest_prices --mode backfill --limit ${{ inputs.limit || 500 }}

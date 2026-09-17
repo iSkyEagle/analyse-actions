@@ -61,9 +61,17 @@ def main() -> None:
     cn = db.connect()
     if not a.finalize_only:
         passe_a(cn, a.skip_sic, a.limit_sic)
+    # La capitalisation vaut actions EDGAR x dernier cours : elle a besoin des DEUX
+    # jobs précédents. Lancée depuis ingest_prices, elle ne trouve pas encore les
+    # actions ; jamais rejouée ensuite, market_cap restait NULL et la passe B ne
+    # retenait personne, sans qu'aucune erreur ne le signale.
+    log.info("passe B — recalcul des capitalisations")
+    log.info("  %d capitalisations calculées", db.refresh_market_caps(cn))
+    cn.commit()
     log.info("passe B — capitalisation et volume médian")
     for k, v in U.finalize_universe(cn).items():
         log.info("  %-20s %s", k, v)
+    cn.commit()
     cn.close()
 
 

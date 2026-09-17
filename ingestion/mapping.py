@@ -310,6 +310,38 @@ def profile_from_sic(sic) -> str:
 # dépôt. Un émetteur qui ne dépose pas majoritairement en 10-K/10-Q relève d'une autre
 # taxonomie et d'un autre mapping. Décision de phase 1 : ces émetteurs sont ingérés
 # pour leurs cours seulement, avec `mapping_profile` renseigné et fondamentaux vides.
+# Marqueurs d'activité opérationnelle. Une fiducie ou un produit indiciel n'a ni
+# immobilisations, ni impôt sur les sociétés — ce sont des entités transparentes —,
+# ni salariés, ni fournisseurs. Une société opérationnelle en porte au moins un.
+MARQUEURS_OPERATIONNELS = (
+    "PropertyPlantAndEquipmentNet",
+    "IncomeTaxExpenseBenefit",
+    "ShareBasedCompensation",
+    "AccountsPayableCurrent",
+    "OperatingLeaseRightOfUseAsset",
+    "EmployeeRelatedLiabilitiesCurrent",
+)
+
+# Seuil de concepts, nécessaire mais NON suffisant. Trois versions ont échoué avant
+# celle-ci, et chacune échangeait une classe de faux exclus contre une autre :
+#
+#   « moins de 100 concepts »          -> écartait Avidity Biosciences (95 concepts)
+#   « bilan + résultat + CA »          -> écartait les biotechs pré-revenus, 733 exclusions
+#   « bilan + résultat + actions dil. »-> écartait Visa et Constellation Brands, dont les
+#                                         actions diluées sont balisées par classe via une
+#                                         dimension que companyfacts supprime
+#
+# La règle retenue exige les DEUX conditions : peu de concepts ET aucun marqueur
+# opérationnel. Visa déclare 626 concepts, elle ne peut plus être touchée quoi qu'il
+# arrive ; Avidity en déclare 95 mais porte 4 marqueurs.
+#
+# Elle est calibrée à zéro faux exclu, pas à zéro faux inclus : neuf produits indiciels
+# passent au travers (CurrencyShares, quelques trusts crypto portant un seul marqueur).
+# C'est l'arbitrage voulu. La règle 2 du mémoire les neutralise en aval — couverture
+# d'axe sous 50 %, aucun score affiché — alors qu'écarter Visa serait irrattrapable.
+SEUIL_CONCEPTS_FAIBLE = 150
+
+
 def out_of_scope(companyfacts: dict, sic=None):
     """Retourne (profil_hors_perimetre, raison) ou (None, None) si mappable ici."""
     facts = companyfacts.get("facts", {})
@@ -330,6 +362,10 @@ def out_of_scope(companyfacts: dict, sic=None):
            + forms.get("10-Q/A", 0)) / total
     if dom < 0.5:
         return "foreign", f"seulement {dom:.0%} des faits déposés en 10-K/10-Q"
-    if profile_from_sic(sic) == "spac" or len(gaap) < 100:
-        return "spac", f"blank check ou coquille : {len(gaap)} concepts us-gaap"
+    if profile_from_sic(sic) == "spac":
+        return "spac", "blank check (SIC 6770)"
+    if (len(gaap) < SEUIL_CONCEPTS_FAIBLE
+            and not any(m in gaap for m in MARQUEURS_OPERATIONNELS)):
+        return "fund", (f"produit indiciel ou fiducie : {len(gaap)} concepts us-gaap "
+                        f"et aucun marqueur d'activité opérationnelle")
     return None, None

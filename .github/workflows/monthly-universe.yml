@@ -1,0 +1,59 @@
+# Reconstruction mensuelle de l'univers.
+#
+# Trois étapes qui doivent s'enchaîner dans cet ordre :
+#
+#   1. Passe A — liste des émetteurs, filtres EDGAR, enrichissement SIC. Ce dernier
+#      coûte un appel `submissions` par société, soit ~9 minutes : c'est le seul poste
+#      lourd, et la raison pour laquelle cette passe est mensuelle et non quotidienne.
+#
+#   2. Cours sur l'ensemble des CANDIDATS, pas seulement l'univers retenu. Sans ça,
+#      une société sortie de l'univers ne recevrait plus jamais de cours, donc plus
+#      jamais de volume médian, donc n'aurait aucun moyen d'y revenir si sa
+#      capitalisation remontait. L'univers se figerait sans que rien ne le signale.
+#
+#   3. Passe B — capitalisation, volume médian, profondeur d'historique visée.
+name: Univers mensuel
+
+on:
+  schedule:
+    - cron: "0 4 1 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  univers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Passe A — émetteurs, filtres, SIC
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python -m jobs.ingest_universe
+
+      - name: Cours sur tous les candidats
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python -m jobs.ingest_prices --mode daily --scope candidates --window-days 95
+
+      - name: Passe B — seuils d'univers
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python -m jobs.ingest_universe --finalize-only

@@ -51,6 +51,7 @@ class ExtractionLog:
     fields_total: int = 0
     fields_from_primary: int = 0
     unmapped_frequent_tags: list = dc_field(default_factory=list)
+    scale_fixed: int = 0
     periods: int = 0
     fiscal_years: int = 0
 
@@ -108,7 +109,7 @@ def _periods(idx):
 
 
 # --- résolution d'un champ ---------------------------------------------------
-def _accessions_for(idx, kind, end, start, chains=()):
+def _accessions_for(idx, kind, end, starts, chains=()):
     """
     Accessions ayant déclaré cette période, classées par capacité à renseigner la ligne.
 
@@ -119,18 +120,20 @@ def _accessions_for(idx, kind, end, start, chains=()):
     """
     covers = defaultdict(int)
     filed = {}
+    starts = tuple(starts) if not isinstance(starts, (str, type(None))) else (starts,)
     tags_of_interest = {t for c in chains for t in c}
     for tag, facts in idx.items():
-        f = facts.get((kind, end, start))
-        if f is None:
-            continue
-        filed[f["accn"]] = f["filed"]
-        if tag in tags_of_interest:
-            covers[f["accn"]] += 1
+        for st in starts:
+            f = facts.get((kind, end, st))
+            if f is None:
+                continue
+            filed[f["accn"]] = f["filed"]
+            if tag in tags_of_interest:
+                covers[f["accn"]] += 1
     return sorted(filed, key=lambda a: (covers.get(a, 0), filed[a]), reverse=True)
 
 
-def _lookup(idx, chain, kind, end, start, accn_order=()):
+def _lookup(idx, chain, kind, end, starts, accn_order=()):
     """
     Parcourt la chaîne de balises, en privilégiant une accession donnée.
 
@@ -138,17 +141,26 @@ def _lookup(idx, chain, kind, end, start, accn_order=()):
     pour que revenue et net_income d'une même ligne viennent du même document. Un 10-K
     ne présente que 2 exercices de bilan contre 3 de compte de résultat : le recours à
     une accession plus ancienne est normal et compté, pas suspect.
+
+    `starts` est un ENSEMBLE de dates de début, pas une seule. Un même exercice peut
+    être daté différemment selon le dépôt — Garmin clôture en semaines fiscales, donc
+    2023-12-31 chez l'un et 2024-01-01 chez l'autre pour le même exercice. Retenir
+    arbitrairement le plus ancien faisait échouer la recherche des balises indexées
+    sur l'autre : deux exercices de Garmin ressortaient entièrement vides.
     Retourne (valeur, balise, accn, filed, rang_accession) ou None.
     """
+    starts = tuple(starts) if not isinstance(starts, (str, type(None))) else (starts,)
     for rank, accn in enumerate(accn_order):
         for tag in chain:
-            f = idx.get(tag, {}).get((kind, end, start))
-            if f is not None and f["accn"] == accn:
-                return f["val"], tag, f["accn"], f["filed"], rank
+            for st in starts:
+                f = idx.get(tag, {}).get((kind, end, st))
+                if f is not None and f["accn"] == accn:
+                    return f["val"], tag, f["accn"], f["filed"], rank
     for tag in chain:                       # filet : accession hors liste
-        f = idx.get(tag, {}).get((kind, end, start))
-        if f is not None:
-            return f["val"], tag, f["accn"], f["filed"], 99
+        for st in starts:
+            f = idx.get(tag, {}).get((kind, end, st))
+            if f is not None:
+                return f["val"], tag, f["accn"], f["filed"], 99
     return None
 
 
@@ -163,13 +175,13 @@ def _resolve_period(idx, profile, kind, end, start, log, period_label):
     chains_stock = [M.BY_NAME[n].chain(profile) for n in M.ORDER
                     if M.applicable(n, profile) and M.BY_NAME[n].kind == M.STOCK]
     order_flow = _accessions_for(idx, kind, end, start, chains_flow)
-    order_stock = _accessions_for(idx, "INSTANT", end, None, chains_stock)
+    order_stock = _accessions_for(idx, "INSTANT", end, (None,), chains_stock)
     for name in M.ORDER:
         f = M.BY_NAME[name]
         if not M.applicable(name, profile):
             continue
         wkind = "INSTANT" if f.kind == M.STOCK else kind
-        wstart = None if f.kind == M.STOCK else start
+        wstart = (None,) if f.kind == M.STOCK else start
         worder = order_stock if f.kind == M.STOCK else order_flow
         hit = _lookup(idx, f.chain(profile), wkind, end, wstart, worder) if f.tags else None
         if hit is not None:
@@ -227,6 +239,14 @@ def _resolve_period(idx, profile, kind, end, start, log, period_label):
     return values, primary, filed, len(accns)
 
 
+# Grandeurs de flux qui ne s'additionnent PAS d'un trimestre à l'autre. Une moyenne
+# pondérée d'actions sur l'exercice moins celle sur neuf mois ne donne rien : constaté
+# en base, des Q4 reconstruits à -5,0 M d'actions pour 3M, 0,1 M pour d'autres. Le BPA
+# est conservé — FY moins 9 mois est l'approximation d'usage, y compris chez les
+# fournisseurs commerciaux — mais les nombres d'actions restent vides sur les Q4.
+NON_ADDITIVE = {"shares_diluted", "shares_basic"}
+
+
 def _derive_q4(fy_values, m9_values, quarters):
     """
     Q4 n'est jamais publié. On le reconstruit sur les grandeurs de flux uniquement :
@@ -236,6 +256,9 @@ def _derive_q4(fy_values, m9_values, quarters):
     for name in M.ORDER:
         f = M.BY_NAME.get(name)
         if f is None or f.kind != M.FLOW:
+            continue
+        if name in NON_ADDITIVE:
+            out[name] = None
             continue
         fy = fy_values.get(name)
         if fy is None:
@@ -252,6 +275,68 @@ def _derive_q4(fy_values, m9_values, quarters):
     return out
 
 
+# --- ruptures d'échelle ------------------------------------------------------
+# Certains déposants publient leurs nombres d'actions EN MILLIERS tout en déclarant
+# l'unité `shares`. Constaté chez Garmin : le 10-K de 2024 donne 192 058 pour
+# l'exercice 2023, les dépôts suivants 192 058 000. La déduplication par `filed`
+# rattrape les exercices récents, mais les anciens n'existent que dans les dépôts à
+# l'ancienne échelle — d'où un facteur 1000 au milieu d'une même série, et une CAGR
+# de dilution de +900 %/an là où il n'y a eu aucune émission.
+# Mesuré sur 1 393 sociétés : 4,7 % touchées, dont ConocoPhillips et Under Armour.
+#
+# La référence de contrôle est interne au dépôt : résultat net / BPA dilué donne le
+# nombre d'actions impliqué, les deux grandeurs venant du même document.
+FACTEURS_ECHELLE = (1e3, 1e6)
+CHAMPS_ACTIONS = ("shares_diluted", "shares_basic")
+
+
+def _fix_scale(rows, log):
+    """Corrige les ruptures d'échelle sur les nombres d'actions, en deux temps."""
+    valides = {}                       # période -> ordre de grandeur validé
+
+    # 1. contrôle par l'identité résultat net / BPA, quand les deux existent
+    for r in rows:
+        ni, eps = r.get("net_income"), r.get("eps_diluted")
+        if ni is None or eps is None or abs(eps) < 0.01:
+            continue
+        implique = abs(ni / eps)
+        if implique <= 0:
+            continue
+        for champ in CHAMPS_ACTIONS:
+            sh = r.get(champ)
+            if not sh or sh <= 0:
+                continue
+            if 0.5 < sh / implique < 2:            # cohérent, rien à faire
+                valides[(r["period_end"], champ)] = sh
+                continue
+            for f in FACTEURS_ECHELLE:
+                if 0.8 < (sh * f) / implique < 1.25:
+                    r[champ] = sh * f
+                    valides[(r["period_end"], champ)] = sh * f
+                    log.scale_fixed += 1
+                    r.setdefault("_scale_corrected", []).append(f"{champ}:x{int(f)}")
+                    break
+
+    # 2. propagation par continuité, pour les exercices sans BPA exploitable
+    for champ in CHAMPS_ACTIONS:
+        connus = sorted((p, v) for (p, c), v in valides.items() if c == champ)
+        if not connus:
+            continue
+        for r in rows:
+            sh = r.get(champ)
+            if not sh or sh <= 0 or (r["period_end"], champ) in valides:
+                continue
+            ref = min(connus, key=lambda kv: abs(
+                (date.fromisoformat(kv[0]) - date.fromisoformat(r["period_end"])).days))[1]
+            for f in FACTEURS_ECHELLE:
+                if 0.5 < (sh * f) / ref < 2 and not 0.5 < sh / ref < 2:
+                    r[champ] = sh * f
+                    log.scale_fixed += 1
+                    r.setdefault("_scale_corrected", []).append(f"{champ}:x{int(f)}")
+                    break
+    return rows
+
+
 # --- point d'entrée ----------------------------------------------------------
 def extract(companyfacts: dict, cik: int, ticker: str, profile: str):
     """Retourne (lignes, log). Une ligne = un dict prêt pour l'upsert `fundamentals`."""
@@ -266,16 +351,14 @@ def extract(companyfacts: dict, cik: int, ticker: str, profile: str):
     rows = []
     by_end = {}
     for end in fy_ends:
-        starts = periods[("FY", end)]
-        start = min(starts) if starts else None
-        vals, accn, filed, n_accn = _resolve_period(idx, profile, "FY", end, start, log, f"FY {end}")
+        starts = tuple(sorted(s for s in periods[("FY", end)] if s)) or (None,)
+        vals, accn, filed, n_accn = _resolve_period(idx, profile, "FY", end, starts, log, f"FY {end}")
         by_end[("FY", end)] = vals
         rows.append(dict(vals, cik=cik, period_end=end, fiscal_period="FY",
                          accn=accn, filed=filed, n_accessions=n_accn))
     for end in q_ends:
-        starts = periods[("Q", end)]
-        start = min(starts) if starts else None
-        vals, accn, filed, n_accn = _resolve_period(idx, profile, "Q", end, start, log, f"Q {end}")
+        starts = tuple(sorted(s for s in periods[("Q", end)] if s)) or (None,)
+        vals, accn, filed, n_accn = _resolve_period(idx, profile, "Q", end, starts, log, f"Q {end}")
         by_end[("Q", end)] = vals
         rows.append(dict(vals, cik=cik, period_end=end, fiscal_period="Q",
                          accn=accn, filed=filed, n_accessions=n_accn))
@@ -287,15 +370,16 @@ def extract(companyfacts: dict, cik: int, ticker: str, profile: str):
         m9 = None
         for (k, e), starts in periods.items():
             if k == "M9" and e < end and _days(e, end) < 100:
-                s = min(starts)
-                m9, _, _, _ = _resolve_period(idx, profile, "M9", e, s, log, f"M9 {e}")
+                st = tuple(sorted(x for x in starts if x)) or (None,)
+                m9, _, _, _ = _resolve_period(idx, profile, "M9", e, st, log, f"M9 {e}")
                 break
-        qs = [by_end[("Q", e)] for e in q_ends if e < end and _days(e, end) < 280]
+        qs = [by_end[("Q", e)] for e in q_ends if e < end and _days(e, end) < 295]
         q4 = _derive_q4(by_end[("FY", end)], m9, qs[-3:] if len(qs) >= 3 else None)
         if any(q4.get(n) is not None for n in ("revenue", "net_income")):
             rows.append(dict(q4, cik=cik, period_end=end, fiscal_period="Q",
                              accn=None, filed=None, n_accessions=0, q4_derived=True))
 
+    _fix_scale(rows, log)
     log.periods = len(rows)
 
     # balises fréquentes non mappées : matière première de la prochaine itération

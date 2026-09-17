@@ -53,7 +53,8 @@ def open_provider(source: str, refresh_dump: bool):
     return provider, provider.source_stamp
 
 
-def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool) -> int:
+def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool,
+        force: bool = False) -> int:
     cn = db.connect()
     provider, stamp = open_provider(source, refresh_dump)
 
@@ -77,9 +78,12 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
                 res = provider.get_fundamentals(issuer)
             except OutOfScope as e:
                 db.mark_out_of_scope(cn, ticker, e.profile)
-                r.fail_provider(e, ticker=ticker, cik=cik)
+                r.skip_provider(e, ticker=ticker, cik=cik)
                 ecartes += 1
-                cn.commit()
+                try:
+                    cn.commit()
+                except Exception:
+                    cn.rollback()
                 continue
             except ProviderError as e:
                 r.fail_provider(e, ticker=ticker, cik=cik)
@@ -90,7 +94,7 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
                        reason=type(e).__name__, detail=str(e))
                 continue
             try:
-                n_rows += db.upsert_fundamentals(cn, res.rows)
+                n_rows += db.upsert_fundamentals(cn, res.rows, force=force)
                 db.update_company_facts(cn, res, sic=sic)
             except Exception as e:
                 cn.rollback()
@@ -120,13 +124,16 @@ def main() -> None:
     p.add_argument("--tickers", type=str, default=None,
                    help="liste séparée par des virgules, force --source api")
     p.add_argument("--refresh-dump", action="store_true")
+    p.add_argument("--force", action="store_true",
+                   help="réécrit même à date de dépôt inchangée : à utiliser après un "
+                        "changement de logique d'extraction")
     p.add_argument("-v", "--verbose", action="store_true")
     a = p.parse_args()
 
     settings.setup_logging(a.verbose)
     settings.require_env()
     tickers = [t.strip().upper() for t in a.tickers.split(",")] if a.tickers else None
-    run("api" if tickers else a.source, a.limit, tickers, a.refresh_dump)
+    run("api" if tickers else a.source, a.limit, tickers, a.refresh_dump, a.force)
 
 
 if __name__ == "__main__":

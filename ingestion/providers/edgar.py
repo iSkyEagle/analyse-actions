@@ -90,8 +90,11 @@ class _EdgarBase(FundamentalsProvider):
     def get_sic(self, cik: int) -> Optional[int]:
         try:
             s = self._get(SUBS_URL.format(cik=cik)).json()
+        except ParseError:
+            return None                     # émetteur sans page submissions : profil par défaut
+        try:
             return int(s.get("sic") or 0) or None
-        except ProviderErrorTuple:
+        except (TypeError, ValueError):
             return None
 
     # -- à implémenter par les sous-classes -----------------------------------
@@ -125,6 +128,7 @@ class _EdgarBase(FundamentalsProvider):
                 filed=_d(r.get("filed")),
                 inferred_zero=r.get("_inferred_zero") or [],
                 q4_derived=bool(r.get("q4_derived")),
+                scale_corrected=r.get("_scale_corrected") or [],
             )
             for r in raw_rows
         ]
@@ -154,7 +158,6 @@ class _EdgarBase(FundamentalsProvider):
         self.session.close()
 
 
-ProviderErrorTuple = (FetchError, ParseError)
 
 
 class EdgarApiProvider(_EdgarBase):

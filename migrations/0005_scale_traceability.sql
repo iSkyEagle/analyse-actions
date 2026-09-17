@@ -1,0 +1,21 @@
+-- =============================================================================
+-- 0005_scale_traceability.sql — Traçabilité des corrections d'échelle
+--
+-- Certains déposants publient leurs nombres d'actions EN MILLIERS tout en déclarant
+-- l'unité `shares`. Garmin : 192 058 pour l'exercice 2023 dans le 10-K de 2024,
+-- 192 058 000 dans les suivants. Les exercices anciens n'existant que dans les dépôts
+-- à l'ancienne échelle, un facteur 1000 apparaît au milieu d'une même série et produit
+-- une CAGR de dilution de +900 %/an là où il n'y a eu aucune émission.
+-- Mesuré : 4,7 % des sociétés touchées, dont ConocoPhillips et Under Armour.
+--
+-- La correction s'appuie sur l'identité résultat net / BPA dilué, interne au dépôt.
+-- Une valeur redressée n'est pas une valeur déposée : elle doit être signalée, comme
+-- l'exige le garde-fou de traçabilité du mémoire.
+--
+-- Colonne volontairement NULLABLE et sans valeur par défaut : sur une table de
+-- plusieurs centaines de milliers de lignes, `not null default` déclenche une
+-- réécriture et dépasse le délai de l'éditeur SQL. Ici l'opération ne touche que les
+-- métadonnées. Le code écrit toujours une liste, jamais NULL.
+-- =============================================================================
+
+alter table fundamentals add column if not exists scale_corrected text[];

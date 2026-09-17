@@ -57,7 +57,7 @@ class OutOfScope(ProviderError):
 # =============================================================================
 # Types normalisés — le contrat entre les providers et le reste du code
 # =============================================================================
-@dataclass(frozen=True)
+@dataclass
 class Issuer:
     cik: int
     ticker: str
@@ -77,6 +77,7 @@ class FundamentalsRow:
     filed: Optional[date] = None
     inferred_zero: list = field(default_factory=list)
     q4_derived: bool = False
+    scale_corrected: list = field(default_factory=list)
 
 
 @dataclass

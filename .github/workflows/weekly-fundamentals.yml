@@ -1,0 +1,62 @@
+# Rafraîchissement hebdomadaire des comptes.
+#
+# Les fondamentaux ne bougent qu'au trimestre : une passe par semaine suffit largement.
+#
+# Trois passages de 1 500 dans le MÊME job, pas trois jobs : le dump companyfacts.zip
+# pèse 1,41 Go et un runner repart d'un disque vide à chaque job. En une seule exécution,
+# il est téléchargé une fois et réutilisé par les trois passages.
+#
+# Le découpage en passages bornés, avec une pause entre chacun, vient d'un constat en
+# production : une rafale de ~280 000 upserts épuise les crédits CPU de l'instance
+# gratuite, qui retombe alors à son débit de base et laisse tout expirer.
+name: Fondamentaux hebdomadaires
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Réécrire même à date de dépôt inchangée (après un changement d'extraction)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ingestion
+  cancel-in-progress: false
+
+jobs:
+  fondamentaux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Comptes, trois passages bornés
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
+        run: |
+          for passage in 1 2 3; do
+            echo "::group::Passage $passage"
+            python -m jobs.ingest_fundamentals --source bulk --limit 1500 $FORCE
+            echo "::endgroup::"
+            [ "$passage" != "3" ] && sleep 120
+          done
+          exit 0
+
+      - name: Recalcul des capitalisations et des seuils
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python -m jobs.ingest_universe --finalize-only
