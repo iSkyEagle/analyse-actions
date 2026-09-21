@@ -68,11 +68,15 @@ def plan_backfill(cn, rows, today: date) -> dict:
     for company_id, cik, ticker, sic, profile, history_years in rows:
         target = _target_start(history_years, today)
         have = coverage.get(company_id)
-        if have is None:
+        if have is None or have[0] > target:
+            # Fenêtre commune (cible -> aujourd'hui) plutôt que (cible -> début de
+            # l'existant). Une borne de fin propre à chaque société produisait une
+            # fenêtre distincte par société, donc des centaines d'appels yfinance d'un
+            # seul ticker : lent, exposé au rate-limit de Yahoo, et c'est ce chemin
+            # unitaire qui plantait. Avec une fenêtre commune, les sociétés d'une même
+            # profondeur visée partagent un lot. Le recouvrement avec l'existant est
+            # sans effet : la fusion est idempotente.
             plan[ticker] = (company_id, target, today)
-        elif have[0] > target:
-            # marge d'un mois pour recouvrir la frontière et éviter un trou
-            plan[ticker] = (company_id, target, have[0] + timedelta(days=31))
     return plan
 
 
