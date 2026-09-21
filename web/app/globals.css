@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Socle neutre de l'étape 1. La direction visuelle sera proposée à l'étape 4,
+   quand la fiche portera ses vraies données : graphe et métriques. */
+:root {
+  color-scheme: light dark;
+}
