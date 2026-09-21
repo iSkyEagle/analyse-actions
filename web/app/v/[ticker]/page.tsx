@@ -11,8 +11,9 @@
  */
 import Link from "next/link";
 import Recherche from "@/app/composants/Recherche";
+import Graphe from "@/app/composants/Graphe";
 import { notFound, permanentRedirect } from "next/navigation";
-import { exercices, lienEdgar, societe } from "@/lib/queries";
+import { cours, exercices, lienEdgar, societe } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
 
 // Données rafraîchies chaque nuit : une heure de cache côté serveur suffit, et évite
@@ -27,7 +28,9 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
   // Une seule URL par valeur : /v/brk.b et /v/BRKB renvoient vers /v/BRK-B.
   if (s.ticker !== demande) permanentRedirect(`/v/${encodeURIComponent(s.ticker)}`);
 
-  const fy = await exercices(s.cik);
+  // Lectures en parallèle : les comptes et les cours sont indépendants, les enchaîner
+  // additionnerait deux allers-retours vers le pooler.
+  const [fy, points] = await Promise.all([exercices(s.cik), cours(s.company_id)]);
   const horsPerimetre = !["standard", "financial", "reit"].includes(s.mapping_profile);
 
   return (
@@ -72,6 +75,13 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
           <p className="text-sm opacity-70">Dernier dépôt</p>
           <p className="text-xl">{date(s.last_xbrl_filing)}</p>
           <p className="text-xs opacity-70">comptes mis à jour le {date(s.fundamentals_refreshed_at)}</p>
+        </div>
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold">Cours</h2>
+        <div className="mt-3">
+          <Graphe points={points} profondeurVisee={s.history_years} />
         </div>
       </section>
 
