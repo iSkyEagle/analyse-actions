@@ -10,7 +10,8 @@
  *   - une valeur inférée ou redressée est signalée comme telle.
  */
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import Recherche from "@/app/composants/Recherche";
+import { notFound, permanentRedirect } from "next/navigation";
 import { exercices, lienEdgar, societe } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
 
@@ -20,15 +21,21 @@ export const revalidate = 3600;
 
 export default async function FicheValeur({ params }: { params: Promise<{ ticker: string }> }) {
   const { ticker } = await params;
-  const s = await societe(decodeURIComponent(ticker));
+  const demande = decodeURIComponent(ticker);
+  const s = await societe(demande);
   if (!s) notFound();
+  // Une seule URL par valeur : /v/brk.b et /v/BRKB renvoient vers /v/BRK-B.
+  if (s.ticker !== demande) permanentRedirect(`/v/${encodeURIComponent(s.ticker)}`);
 
   const fy = await exercices(s.cik);
   const horsPerimetre = !["standard", "financial", "reit"].includes(s.mapping_profile);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <Link href="/" className="text-sm underline">Autre valeur</Link>
+      <div className="flex items-center gap-4">
+        <Link href="/" className="text-sm underline">Accueil</Link>
+        <div className="flex-1"><Recherche /></div>
+      </div>
 
       <header className="mt-6">
         <h1 className="text-3xl font-semibold">{s.ticker}</h1>
