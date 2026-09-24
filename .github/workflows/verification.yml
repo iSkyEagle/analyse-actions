@@ -1,0 +1,37 @@
+# Cohérence de la configuration des métriques.
+#
+# Les formules et la configuration vivent dans ingestion/metriques.py. L'interface lit
+# une copie exportée, web/lib/metriques.json. Si l'une change sans l'autre, la fiche
+# affiche un libellé ou un format qui ne correspond plus au calcul — sans erreur.
+# Ce contrôle échoue au moment du push, avant qu'un tel écart n'arrive en production.
+#
+# Correction : depuis ingestion/, `python metriques.py > ../web/lib/metriques.json`.
+name: Vérification
+
+on:
+  push:
+    paths:
+      - "ingestion/metriques.py"
+      - "web/lib/metriques.json"
+  workflow_dispatch:
+
+jobs:
+  config-metriques:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: La configuration exportée est à jour
+        working-directory: ingestion
+        run: |
+          python metriques.py > /tmp/attendu.json
+          if ! diff -q /tmp/attendu.json ../web/lib/metriques.json > /dev/null; then
+            echo "::error::web/lib/metriques.json est désynchronisé de ingestion/metriques.py."
+            echo "Régénérer depuis ingestion/ : python metriques.py > ../web/lib/metriques.json"
+            diff /tmp/attendu.json ../web/lib/metriques.json | head -20
+            exit 1
+          fi
+          echo "Configuration synchrone."

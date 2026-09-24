@@ -63,7 +63,7 @@ def plan_backfill(cn, rows, today: date) -> dict:
     Les sociétés déjà couvertes sont écartées du plan : c'est ce qui rend le backfill
     reprenable et borné, au lieu de retélécharger l'univers à chaque passage.
     """
-    coverage = db.price_coverage(cn)
+    coverage = db.price_coverage(cn, [r[0] for r in rows])
     plan = {}
     for company_id, cik, ticker, sic, profile, history_years in rows:
         target = _target_start(history_years, today)
@@ -92,12 +92,21 @@ def run(mode: str, limit: int | None, window_days: int, dry_run: bool,
     # Le scope 'candidats' sert aussi hors amorçage : sans cours, une société sortie de
     # l'univers ne pourrait jamais y rentrer, même si sa capitalisation remonte. À
     # lancer une fois par mois, avant `ingest_universe --finalize-only`.
+    # Backfill : on examine TOUTE la population, et c'est le plan qui est borné — pas la
+    # sélection. La version précédente prenait les `limit` sociétés aux cours les moins
+    # récemment mis à jour, puis cherchait lesquelles avaient un historique incomplet.
+    # Or le job quotidien remet cette date à jour pour tout l'univers chaque soir : à
+    # 5 h, toutes étaient à égalité, départagées par leur identifiant, et c'étaient
+    # toujours les 500 mêmes qui étaient choisies. Une fois celles-ci complètes, le
+    # backfill ne trouvait plus rien à faire et les ~2 400 autres n'atteignaient jamais
+    # leur profondeur visée. Le bon critère est l'historique manquant, pas la fraîcheur.
+    limite_selection = None if mode == "backfill" else limit
     rows = db.select_universe(cn, in_universe=(scope == "universe"),
-                              stale_first="prices", limit=limit)
+                              stale_first="prices", limit=limite_selection)
     if not rows and scope == "universe":
         log.warning("univers non encore finalisé — bascule sur l'ensemble des candidats")
         scope = "candidates"
-        rows = db.select_universe(cn, in_universe=False, stale_first="prices", limit=limit)
+        rows = db.select_universe(cn, in_universe=False, stale_first="prices", limit=limite_selection)
     if not rows:
         log.warning("aucun candidat en base — lancer d'abord ingest_universe")
         return 0
@@ -108,7 +117,7 @@ def run(mode: str, limit: int | None, window_days: int, dry_run: bool,
         # semaine — trou que le backfill, qui n'étend que vers l'amont, ne comble jamais.
         # La fenêtre part donc de la séance la plus ancienne parmi les dernières connues,
         # bornée à 90 jours, en un seul appel groupé.
-        coverage = db.price_coverage(cn)
+        coverage = db.price_coverage(cn, [r[0] for r in rows])
         derniers = [coverage[r[0]][1] for r in rows if r[0] in coverage]
         plus_ancien = min(derniers) if derniers else today
         start = max(min(plus_ancien, today - timedelta(days=window_days)),
@@ -117,8 +126,15 @@ def run(mode: str, limit: int | None, window_days: int, dry_run: bool,
             log.info("rattrapage : la fenêtre remonte au %s", start)
         plan = {r[2]: (r[0], start, today) for r in rows}
     else:
-        plan = plan_backfill(cn, rows, today)
-        log.info("backfill : %d sociétés à compléter sur %d examinées", len(plan), len(rows))
+        complet = plan_backfill(cn, rows, today)
+        # Ordre déterministe par identifiant : les identifiants suivent l'ordre du fichier
+        # SEC à la création, trié par capitalisation décroissante, donc les grandes
+        # valeurs passent en premier. Une société complétée sort d'elle-même du plan :
+        # le curseur est la donnée, aucun état à conserver entre deux passages.
+        ordre = sorted(complet.items(), key=lambda kv: kv[1][0])
+        plan = dict(ordre[:limit] if limit else ordre)
+        log.info("backfill : %d sociétés à l'historique incomplet sur %d examinées, "
+                 "%d traitées ce passage", len(complet), len(rows), len(plan))
 
     if not plan:
         log.info("rien à faire")

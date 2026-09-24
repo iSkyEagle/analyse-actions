@@ -430,8 +430,92 @@ def mark_refreshed(cn, kind: str, ids: Iterable, on: Optional[date] = None) -> i
         return c.rowcount
 
 
-def price_coverage(cn) -> dict:
-    """{company_id: (premier_mois, dernier_mois)} — base du backfill différencié."""
+def price_coverage(cn, company_ids: list) -> dict:
+    """
+    {company_id: (premier_mois, dernier_mois)} pour les sociétés demandées.
+
+    Deux sondages d'index par société, sur la clé primaire (company_id, ym), et jamais
+    d'agrégat sur la table entière. La première version faisait un `group by` sur
+    TOUS les cours — 82 Mo de tableaux lus à chaque passage — et dépassait le délai
+    d'exécution de l'instance nano : les runs quotidiens échouaient sur un
+    `canceling statement due to statement timeout`. Le coût dépend désormais du nombre
+    de sociétés interrogées, plus de la taille de l'historique.
+    """
+    if not company_ids:
+        return {}
     with cn.cursor() as c:
-        c.execute("select company_id, min(ym), max(ym) from prices group by company_id")
+        c.execute("""
+            select s.company_id, debut.ym, fin.ym
+            from unnest(%s::smallint[]) as s(company_id)
+            cross join lateral (select ym from prices p where p.company_id = s.company_id
+                                order by ym asc limit 1) debut
+            cross join lateral (select ym from prices p where p.company_id = s.company_id
+                                order by ym desc limit 1) fin
+        """, (list(company_ids),))
         return {r[0]: (r[1], r[2]) for r in c.fetchall()}
+
+
+# =============================================================================
+# Métriques — lecture par lots, écriture idempotente
+# =============================================================================
+def charger_fondamentaux(cn, ciks: list) -> dict:
+    """{cik: [ligne]} pour un lot de sociétés, en une requête.
+
+    Les dates sont rendues en chaîne 'AAAA-MM-JJ' : le moteur de métriques les compare
+    et les soustrait sous cette forme, indépendamment du pilote de base.
+    """
+    if not ciks:
+        return {}
+    cols = ["cik", "period_end", "fiscal_period"] + FUND_COLS
+    with cn.cursor() as c:
+        c.execute(f"select {', '.join(cols)} from fundamentals where cik = any(%s) "
+                  f"order by cik, period_end", (list(ciks),))
+        out: dict = {}
+        for ligne in c.fetchall():
+            r = dict(zip(cols, ligne))
+            r["period_end"] = r["period_end"].isoformat()
+            out.setdefault(r["cik"], []).append(r)
+        return out
+
+
+def charger_cours(cn, company_ids: list, depuis: date) -> dict:
+    """{company_id: [('AAAA-MM-JJ', clôture)]} croissant, déroulé des tableaux mensuels."""
+    if not company_ids:
+        return {}
+    with cn.cursor() as c:
+        c.execute("""
+            select p.company_id, (p.ym + (t.j - 1))::date, t.c
+            from prices p, unnest(p.d, p.c) as t(j, c)
+            where p.company_id = any(%s) and p.ym >= date_trunc('month', %s::date)::date
+            order by 1, 2
+        """, (list(company_ids), depuis))
+        out: dict = {}
+        for cid, d, cl in c.fetchall():
+            out.setdefault(cid, []).append((d.isoformat(), float(cl)))
+        return out
+
+
+def ecrire_metriques(cn, company_ids: list, lignes: list, series: list) -> None:
+    """
+    Remplace l'instantané et les séries annuelles d'un lot de sociétés.
+
+    Suppression puis insertion dans la MÊME transaction : relancer le job laisse la base
+    identique, et une société absente du lot garde sa dernière valeur connue.
+    `lignes` : (company_id, as_of, metric_id, value, raison)
+    `series` : (company_id, metric_id, period_end, value)
+    """
+    if not company_ids:
+        return
+    with cn.cursor() as c:
+        c.execute("delete from metrics where company_id = any(%s)", (list(company_ids),))
+        c.execute("delete from metric_series where company_id = any(%s)", (list(company_ids),))
+        if lignes:
+            X.execute_values(c, "insert into metrics (company_id, as_of, metric_id, value, raison, "
+                                "is_applicable) values %s",
+                             [(cid, a, m, _clean(v), r, v is not None or r is None)
+                              for cid, a, m, v, r in lignes], page_size=2000)
+        if series:
+            X.execute_values(c, "insert into metric_series (company_id, metric_id, period_end, value) "
+                                "values %s",
+                             [(cid, m, p, _clean(v)) for cid, m, p, v in series
+                              if _clean(v) is not None], page_size=2000)

@@ -82,54 +82,65 @@ export default function Graphe({
     const el = conteneur.current;
     if (!el || points.length === 0) return;
 
-    // Le canvas ne lit pas les variables CSS : on relève les couleurs effectives du
-    // thème à la création, pour suivre le mode clair ou sombre du système.
-    const style = getComputedStyle(el);
-    const texte = style.color;
-    const fond = getComputedStyle(document.body).backgroundColor || "transparent";
+    // Le canvas ne lit pas les variables CSS : on relève les jetons du registre à la
+    // création, pour suivre le mode clair ou sombre du système.
+    const jeton = (nom: string) => getComputedStyle(document.documentElement).getPropertyValue(nom).trim();
+    const encre = jeton("--encre"), seconde = jeton("--encre-seconde");
+    const bande = jeton("--bande"), filet = jeton("--filet"), fond = jeton("--papier");
 
     const chart = createChart(el, {
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: fond },
-        textColor: texte,
+        textColor: seconde,
+        fontFamily: getComputedStyle(document.body).fontFamily,
         attributionLogo: true,
+        panes: { separatorColor: filet, separatorHoverColor: bande, enableResize: false },
       },
-      localization: {
-        locale: "fr-FR",
-        priceFormatter: (p: number) =>
-          new Intl.NumberFormat("fr-FR", { minimumFractionDigits: precision, maximumFractionDigits: precision }).format(p),
-      },
-      grid: { vertLines: { visible: false }, horzLines: { color: "rgba(128,128,128,0.15)" } },
+      // Pas de formateur global : il s'appliquerait à toutes les échelles, volume compris
+      // (« 50 000 000,00 » sous le graphe). Chaque série déclare le sien.
+      localization: { locale: "fr-FR" },
+      grid: { vertLines: { visible: false }, horzLines: { color: bande } },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false },
     });
 
     const prix = chart.addSeries(AreaSeries, {
-      lineColor: texte,
+      lineColor: encre,
       lineWidth: 2,
-      topColor: "rgba(128,128,128,0.25)",
-      bottomColor: "rgba(128,128,128,0.02)",
+      topColor: bande,
+      bottomColor: fond,
       priceLineVisible: false,
-      priceFormat: { type: "price", precision, minMove: 1 / 10 ** precision },
+      priceFormat: {
+        type: "custom",
+        minMove: 1 / 10 ** precision,
+        formatter: (p: number) =>
+          new Intl.NumberFormat("fr-FR", { minimumFractionDigits: precision, maximumFractionDigits: precision }).format(p),
+      },
     });
     prix.setData(donnees.prix);
-    // Marge basse réservée à la bande de volume : sans elle, la courbe descendait dans
-    // l'histogramme dès que le cours touchait le bas de sa fourchette — visible à la
-    // première capture d'écran, invisible dans le HTML.
-    prix.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.2 } });
+    prix.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.04 } });
 
-    // Volume en surimpression, dans les 14 % inférieurs, sur une échelle à part. Teinte
-    // légère : c'est un contexte, pas l'information principale.
+    // Volume dans son propre panneau, sous les cours. Deux versions précédentes le
+    // superposaient au cours dans une marge basse : la courbe plongeait dans
+    // l'histogramme, puis, marge élargie, l'axe des prix descendait sous zéro (-4,00
+    // pour une valeur à un dollar). Un panneau séparé règle les deux d'un coup.
     const vol = chart.addSeries(HistogramSeries, {
-      priceScaleId: "",
-      color: "rgba(128,128,128,0.22)",
-      priceFormat: { type: "volume" },
+      color: filet,
+      priceFormat: {
+        type: "custom",
+        minMove: 1,
+        formatter: (v: number) =>
+          new Intl.NumberFormat("fr-FR", { notation: "compact", maximumFractionDigits: 1 }).format(v),
+      },
       lastValueVisible: false,
       priceLineVisible: false,
-    });
-    vol.priceScale().applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
+    }, 1);
+    vol.priceScale().applyOptions({ scaleMargins: { top: 0.15, bottom: 0 } });
     vol.setData(donnees.volumes);
+    const panneaux = chart.panes();
+    panneaux[0]?.setStretchFactor(0.82);
+    panneaux[1]?.setStretchFactor(0.18);
 
     graphe.current = chart;
     return () => {
@@ -180,7 +191,8 @@ export default function Graphe({
               disabled={indisponible}
               aria-pressed={plage === p.id}
               title={indisponible ? `Historique insuffisant : ${duree(anneesDispo)} disponible${anneesDispo < 2 ? "" : "s"}` : undefined}
-              className={`rounded border px-3 py-1 text-sm disabled:opacity-40 ${plage === p.id ? "font-semibold" : ""}`}
+              className={`rounded-sm border px-3 py-1 text-sm disabled:opacity-35 ${plage === p.id
+                ? "border-encre font-semibold text-encre" : "border-filet text-encre-seconde"}`}
             >
               {p.libelle}
             </button>
@@ -190,7 +202,7 @@ export default function Graphe({
 
       <div ref={conteneur} role="img" aria-label={resume} className="h-72 w-full sm:h-96" />
 
-      <figcaption className="mt-2 text-xs opacity-70">
+      <figcaption className="mt-2 text-sm text-encre-seconde">
         Clôture ajustée des dividendes et des divisions d'actions. Historique disponible
         du {fmtDate(premier!)} au {fmtDate(dernier![0])}.
         {incomplet && (

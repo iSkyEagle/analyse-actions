@@ -60,3 +60,12 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: python -m jobs.ingest_universe --finalize-only
+
+      # Passage complet : cinq ans de cours, et recalcul de la pire baisse sur 5 ans que
+      # le passage quotidien se contente de reporter.
+      - name: Calcul complet des métriques
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python -m jobs.ingest_metrics --complet

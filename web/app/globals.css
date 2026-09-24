@@ -1,7 +1,54 @@
 @import "tailwindcss";
 
-/* Socle neutre de l'étape 1. La direction visuelle sera proposée à l'étape 4,
-   quand la fiche portera ses vraies données : graphe et métriques. */
+/*
+ * Registre comptable — jetons de la direction visuelle validée.
+ * Papier à peine teinté de vert, encre bleu-noir, rouge réservé aux pertes.
+ * La couleur situe, elle ne juge pas : aucun vert « bon marché » ni rouge « cher ».
+ */
 :root {
-  color-scheme: light dark;
+  --papier: #F6F7F4;
+  --encre: #1E2B38;
+  --encre-seconde: #5B6773;
+  --bande: #E4EEE6;
+  --filet: #C9D3CC;
+  --perte: #B42318;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --papier: #141C22;
+    --encre: #E3E9E4;
+    --encre-seconde: #93A09A;
+    --bande: #1E2B27;
+    --filet: #34443E;
+    --perte: #F07B6E;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-papier: var(--papier);
+  --color-encre: var(--encre);
+  --color-encre-seconde: var(--encre-seconde);
+  --color-bande: var(--bande);
+  --color-filet: var(--filet);
+  --color-perte: var(--perte);
+  --font-sans: var(--font-public-sans), system-ui, sans-serif;
+}
+
+body {
+  background: var(--papier);
+  color: var(--encre);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+/* Focus clavier toujours visible, dans la couleur de l'encre. */
+:focus-visible {
+  outline: 2px solid var(--encre);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
 }

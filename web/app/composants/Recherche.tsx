@@ -104,11 +104,11 @@ export default function Recherche({ autoFocus = false }: { autoFocus?: boolean }
         aria-expanded={visible}
         aria-controls={idListe}
         aria-activedescendant={visible && actif >= 0 ? `${idListe}-${actif}` : undefined}
-        className="w-full rounded border px-3 py-2"
+        className="w-full rounded-sm border border-filet bg-papier px-3 py-2 placeholder:text-encre-seconde"
       />
 
       {visible && (
-        <ul id={idListe} role="listbox" className="absolute z-10 mt-1 w-full overflow-hidden rounded border bg-[Canvas]">
+        <ul id={idListe} role="listbox" className="absolute z-10 mt-1 w-full overflow-hidden rounded-sm border border-filet bg-papier shadow-sm">
           {resultats.map((r, i) => (
             <li
               key={r.ticker}
@@ -120,13 +120,13 @@ export default function Recherche({ autoFocus = false }: { autoFocus?: boolean }
                 ouvrir(r.ticker);
               }}
               onMouseEnter={() => setActif(i)}
-              className={`cursor-pointer px-3 py-2 ${i === actif ? "bg-[Highlight] text-[HighlightText]" : ""}`}
+              className={`cursor-pointer px-3 py-2 ${i === actif ? "bg-bande" : ""}`}
             >
               <span className="font-medium">{r.ticker}</span>{" "}
-              <span className="opacity-80">{r.nom}</span>
-              {!r.univers && <span className="ml-2 text-xs opacity-60">hors univers</span>}
+              <span className="text-encre-seconde">{r.nom}</span>
+              {!r.univers && <span className="ml-2 text-sm text-encre-seconde">hors univers</span>}
               {r.autres.length > 0 && (
-                <span className="block text-xs opacity-60">
+                <span className="block text-sm text-encre-seconde">
                   aussi coté {r.autres.slice(0, 3).join(", ")}
                   {r.autres.length > 3 && ` et ${r.autres.length - 3} autres lignes`}
                 </span>

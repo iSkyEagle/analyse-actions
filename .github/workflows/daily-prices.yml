@@ -39,3 +39,13 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: python -m jobs.ingest_prices --mode daily
+
+      # Les multiples dépendent du cours du jour : recalcul après chaque mise à jour.
+      # Passage léger : treize mois de cours, ~7 Mo lus. La pire baisse sur 5 ans est
+      # reportée du passage hebdomadaire complet.
+      - name: Calcul des métriques
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: python -m jobs.ingest_metrics
