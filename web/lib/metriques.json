@@ -1,0 +1,305 @@
+{
+ "axes": [
+  {
+   "id": "valorisation",
+   "libelle": "Valorisation"
+  },
+  {
+   "id": "qualite",
+   "libelle": "Qualité et solidité"
+  },
+  {
+   "id": "croissance",
+   "libelle": "Croissance annuelle moyenne"
+  },
+  {
+   "id": "dilution",
+   "libelle": "Dilution"
+  },
+  {
+   "id": "risque",
+   "libelle": "Risque"
+  }
+ ],
+ "metriques": [
+  {
+   "id": "per",
+   "libelle": "PER",
+   "axe": "valorisation",
+   "format": "multiple",
+   "serie": false,
+   "perte": false,
+   "note": "capitalisation / résultat net des 12 derniers mois"
+  },
+  {
+   "id": "prix_ventes",
+   "libelle": "Prix sur ventes",
+   "axe": "valorisation",
+   "format": "multiple",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "prix_valeur_comptable",
+   "libelle": "Prix sur valeur comptable",
+   "axe": "valorisation",
+   "format": "multiple",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "ve_ebitda",
+   "libelle": "Valeur d'entreprise sur EBITDA",
+   "axe": "valorisation",
+   "format": "multiple",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "ve_fcf",
+   "libelle": "Valeur d'entreprise sur flux de trésorerie libre",
+   "axe": "valorisation",
+   "format": "multiple",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "rendement_dividende",
+   "libelle": "Rendement du dividende",
+   "axe": "valorisation",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "taux_distribution",
+   "libelle": "Taux de distribution",
+   "axe": "valorisation",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "peg_historique",
+   "libelle": "PER sur croissance passée",
+   "axe": "valorisation",
+   "format": "multiple",
+   "serie": false,
+   "perte": false,
+   "note": "PER / croissance annuelle du résultat net sur 5 ans. Variante calculable du PEG, qui exige des prévisions d'analystes que nous n'avons pas."
+  },
+  {
+   "id": "marge_brute",
+   "libelle": "Marge brute",
+   "axe": "qualite",
+   "format": "pourcentage",
+   "serie": true,
+   "perte": true,
+   "note": ""
+  },
+  {
+   "id": "marge_operationnelle",
+   "libelle": "Marge opérationnelle",
+   "axe": "qualite",
+   "format": "pourcentage",
+   "serie": true,
+   "perte": true,
+   "note": ""
+  },
+  {
+   "id": "marge_nette",
+   "libelle": "Marge nette",
+   "axe": "qualite",
+   "format": "pourcentage",
+   "serie": true,
+   "perte": true,
+   "note": ""
+  },
+  {
+   "id": "roe",
+   "libelle": "Rentabilité des capitaux propres",
+   "axe": "qualite",
+   "format": "pourcentage",
+   "serie": true,
+   "perte": true,
+   "note": ""
+  },
+  {
+   "id": "roic",
+   "libelle": "Rentabilité des capitaux investis",
+   "axe": "qualite",
+   "format": "pourcentage",
+   "serie": true,
+   "perte": true,
+   "note": ""
+  },
+  {
+   "id": "dette_nette_ebitda",
+   "libelle": "Dette nette sur EBITDA",
+   "axe": "qualite",
+   "format": "multiple",
+   "serie": true,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "couverture_interets",
+   "libelle": "Couverture des intérêts",
+   "axe": "qualite",
+   "format": "multiple",
+   "serie": true,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "ratio_liquidite",
+   "libelle": "Actif courant sur passif courant",
+   "axe": "qualite",
+   "format": "multiple",
+   "serie": true,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_ca_3a",
+   "libelle": "Chiffre d'affaires, 3 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_ca_5a",
+   "libelle": "Chiffre d'affaires, 5 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_rn_3a",
+   "libelle": "Résultat net, 3 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_rn_5a",
+   "libelle": "Résultat net, 5 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_fcf_5a",
+   "libelle": "Flux de trésorerie libre, 5 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "croissance_trimestre",
+   "libelle": "Dernier trimestre sur un an",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_actions_1a",
+   "libelle": "Nombre d'actions, 1 an",
+   "axe": "dilution",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_actions_3a",
+   "libelle": "Nombre d'actions, 3 ans",
+   "axe": "dilution",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_actions_5a",
+   "libelle": "Nombre d'actions, 5 ans",
+   "axe": "dilution",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "sbc_ventes",
+   "libelle": "Rémunération en actions sur ventes",
+   "axe": "dilution",
+   "format": "pourcentage",
+   "serie": true,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "rendement_rachats_nets",
+   "libelle": "Rachats nets d'émissions, rapportés à la capitalisation",
+   "axe": "dilution",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "autonomie",
+   "libelle": "Autonomie de trésorerie",
+   "axe": "dilution",
+   "format": "trimestres",
+   "serie": false,
+   "perte": false,
+   "note": "trésorerie / consommation trimestrielle, pour les sociétés qui brûlent du cash"
+  },
+  {
+   "id": "volatilite_1a",
+   "libelle": "Volatilité annualisée, 1 an",
+   "axe": "risque",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "drawdown_max_5a",
+   "libelle": "Pire baisse depuis un sommet, 5 ans",
+   "axe": "risque",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "distance_plus_haut_52s",
+   "libelle": "Écart au plus haut sur 52 semaines",
+   "axe": "risque",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  }
+ ]
+}

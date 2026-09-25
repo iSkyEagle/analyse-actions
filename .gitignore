@@ -233,3 +233,6 @@ subs/
 # Scripts jetables
 check.py
 diag.py
+
+# Le modele Python ignore tout dossier lib/ ; celui de l'interface doit etre versionne.
+!web/lib/
