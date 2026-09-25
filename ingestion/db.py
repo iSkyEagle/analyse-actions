@@ -202,7 +202,13 @@ def refresh_market_caps(cn) -> int:
 # =============================================================================
 _SET = ", ".join(f"{c} = excluded.{c}" for c in FUND_COLS)
 
-UPSERT_FUNDAMENTALS = f"""
+# Colonnes dont un changement justifie une réécriture. `ingested_at` n'en fait pas
+# partie : c'est précisément lui qui changeait à chaque passage.
+_DONNEES = ["fiscal_year"] + FUND_COLS + ["accn", "filed", "inferred_zero", "q4_derived", "scale_corrected"]
+_CHANGE = (f"({', '.join('fundamentals.' + c for c in _DONNEES)}) is distinct from "
+           f"({', '.join('excluded.' + c for c in _DONNEES)})")
+
+_UPSERT_BASE = f"""
 insert into fundamentals
   (cik, period_end, fiscal_period, fiscal_year, {', '.join(FUND_COLS)},
    accn, filed, inferred_zero, q4_derived, scale_corrected)
@@ -216,21 +222,26 @@ on conflict (cik, period_end, fiscal_period) do update set
   q4_derived = excluded.q4_derived,
   scale_corrected = excluded.scale_corrected,
   ingested_at = now()
-where excluded.filed is not null
-  and (fundamentals.filed is null or excluded.filed >= fundamentals.filed)
 """
 
-# `>=` et non `>`. La version stricte protégeait bien contre l'écrasement par un dépôt
-# plus ancien — c'est le but — mais bloquait aussi la réingestion du MÊME dépôt par un
-# moteur d'extraction corrigé : `filed` identique, condition fausse, mise à jour
-# ignorée en silence. Constaté en production : quatre passages complets des
-# fondamentaux n'ont réécrit aucune ligne existante, et les corrections d'échelle ne
-# sont jamais arrivées en base.
-# À date de dépôt égale, la source est la même : la dernière extraction fait foi.
+# Deux conditions cumulées :
+#   - `filed >=` : un dépôt antérieur n'écrase jamais un dépôt plus récent (retraitement).
+#     `>=` et non `>`, pour qu'une extraction corrigée du même dépôt puisse s'appliquer.
+#   - `is distinct from` : une ligne identique n'est PAS réécrite. Dans Postgres, une mise
+#     à jour écrit une nouvelle version et laisse l'ancienne à nettoyer : réécrire à
+#     l'identique coûte autant qu'une vraie modification, deux fois. Le passage
+#     hebdomadaire réécrivait ~262 000 lignes à 99 % inchangées, et l'attente disque qui
+#     en résultait saturait l'instance nano — connexions refusées la nuit suivante.
+UPSERT_FUNDAMENTALS = _UPSERT_BASE + f"""
+where excluded.filed is not null
+  and (fundamentals.filed is null or excluded.filed >= fundamentals.filed)
+  and {_CHANGE}
+"""
 
-# Réingestion forcée, pour un changement de logique d'extraction qui ne modifie pas
-# les dates de dépôt. Ne relâche que le garde-fou de retraitement, rien d'autre.
-UPSERT_FUNDAMENTALS_FORCE = UPSERT_FUNDAMENTALS.rsplit("where excluded.filed", 1)[0]
+# Réingestion forcée : relâche la seule garde de retraitement, garde celle d'identité.
+UPSERT_FUNDAMENTALS_FORCE = _UPSERT_BASE + f"""
+where {_CHANGE}
+"""
 
 
 def upsert_fundamentals(cn, rows: Iterable, force: bool = False) -> int:
@@ -309,6 +320,10 @@ cross join lateral (
 ) m
 on conflict (company_id, ym) do update
     set d = excluded.d, c = excluded.c, v = excluded.v
+    -- Un mois dont la fusion ne change rien n'est pas réécrit. Le rattrapage quotidien
+    -- refusionne plusieurs mois déjà complets : sans cette garde, chacun devenait une
+    -- nouvelle version de ligne et une ancienne à nettoyer.
+    where (prices.d, prices.c, prices.v) is distinct from (excluded.d, excluded.c, excluded.v)
 """
 
 
@@ -497,25 +512,51 @@ def charger_cours(cn, company_ids: list, depuis: date) -> dict:
 
 def ecrire_metriques(cn, company_ids: list, lignes: list, series: list) -> None:
     """
-    Remplace l'instantané et les séries annuelles d'un lot de sociétés.
+    Met à jour l'instantané et les séries annuelles d'un lot, en DIFFÉRENTIEL.
 
-    Suppression puis insertion dans la MÊME transaction : relancer le job laisse la base
-    identique, et une société absente du lot garde sa dernière valeur connue.
+    La première version supprimait puis réinsérait tout : ~91 000 lignes par soir, alors
+    que seuls les multiples bougent avec le cours — les marges, la croissance et la
+    dilution restent identiques d'un jour à l'autre. Désormais :
+      - une métrique inchangée n'est pas réécrite ;
+      - une métrique modifiée est mise à jour ;
+      - seule une métrique qui n'est plus produite est supprimée.
+    Toujours dans une transaction : relancer le job laisse la base identique, et une
+    société absente du lot garde sa dernière valeur connue.
+
     `lignes` : (company_id, as_of, metric_id, value, raison)
     `series` : (company_id, metric_id, period_end, value)
     """
     if not company_ids:
         return
+    ids = list(company_ids)
     with cn.cursor() as c:
-        c.execute("delete from metrics where company_id = any(%s)", (list(company_ids),))
-        c.execute("delete from metric_series where company_id = any(%s)", (list(company_ids),))
         if lignes:
-            X.execute_values(c, "insert into metrics (company_id, as_of, metric_id, value, raison, "
-                                "is_applicable) values %s",
-                             [(cid, a, m, _clean(v), r, v is not None or r is None)
-                              for cid, a, m, v, r in lignes], page_size=2000)
+            X.execute_values(c, """
+                insert into metrics (company_id, as_of, metric_id, value, raison, is_applicable)
+                values %s
+                on conflict (company_id, metric_id) do update
+                  set value = excluded.value, raison = excluded.raison,
+                      is_applicable = excluded.is_applicable, as_of = excluded.as_of
+                  where (metrics.value, metrics.raison) is distinct from (excluded.value, excluded.raison)
+            """, [(cid, a, m, _clean(v), r, v is not None or r is None) for cid, a, m, v, r in lignes],
+                page_size=2000)
+            # Seules disparaissent les métriques qui ne sont plus produites pour la société.
+            c.execute("""
+                delete from metrics m
+                where m.company_id = any(%s)
+                  and (m.company_id, m.metric_id) not in (
+                      select * from unnest(%s::smallint[], %s::text[]))
+            """, (ids, [l[0] for l in lignes], [l[2] for l in lignes]))
         if series:
-            X.execute_values(c, "insert into metric_series (company_id, metric_id, period_end, value) "
-                                "values %s",
-                             [(cid, m, p, _clean(v)) for cid, m, p, v in series
-                              if _clean(v) is not None], page_size=2000)
+            propres = [(cid, m, p, _clean(v)) for cid, m, p, v in series if _clean(v) is not None]
+            X.execute_values(c, """
+                insert into metric_series (company_id, metric_id, period_end, value) values %s
+                on conflict (company_id, metric_id, period_end) do update set value = excluded.value
+                  where metric_series.value is distinct from excluded.value
+            """, propres, page_size=2000)
+            c.execute("""
+                delete from metric_series s
+                where s.company_id = any(%s)
+                  and (s.company_id, s.metric_id, s.period_end) not in (
+                      select * from unnest(%s::smallint[], %s::text[], %s::date[]))
+            """, (ids, [p[0] for p in propres], [p[1] for p in propres], [p[2] for p in propres]))
