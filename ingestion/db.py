@@ -50,6 +50,80 @@ def connect(url: Optional[str] = None):
     return cn
 
 
+# =============================================================================
+# Textes de requête CONSTANTS
+#
+# `execute_values` et les listes Python adaptées en ARRAY[...] inscrivent chaque valeur
+# dans le texte SQL. L'extension pg_stat_statements, que la supervision de Supabase
+# interroge en continu, recense alors une requête DIFFÉRENTE pour chaque nombre de
+# lignes — une par société, puisque chacune a un nombre d'exercices différent. Mesuré :
+# 46 entrées et 1,2 Mo de texte pour 40 sociétés seulement, jusqu'à 55 Ko par requête.
+# Sur l'univers réel, la supervision de Supabase mettait 11 à 17 secondes à relire ces
+# textes sur l'instance nano.
+#
+# Deux règles, appliquées à toutes les écritures groupées :
+#   - les données passent par COPY dans une table de transit, puis une instruction
+#     d'insertion au texte constant ;
+#   - les listes d'identifiants passent comme UN SEUL littéral '{1,2,3}', jamais comme
+#     ARRAY[1,2,3], qui compterait autant de constantes que d'éléments.
+# =============================================================================
+import io
+
+
+def _echappe_copie(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
+
+
+def _litteral_tableau(valeurs) -> str:
+    """Tableau Postgres sous forme de littéral texte : '{1,2}', '{"a","b"}'."""
+    elements = []
+    for x in valeurs:
+        if x is None:
+            elements.append("NULL")
+        elif isinstance(x, bool):
+            elements.append("t" if x else "f")
+        elif isinstance(x, (int, float)):
+            elements.append(repr(float(x)) if isinstance(x, float) else str(x))
+        elif isinstance(x, date):
+            elements.append(x.isoformat())
+        else:
+            s = str(x).replace("\\", "\\\\").replace('"', '\\"')
+            elements.append(f'"{s}"')
+    return "{" + ",".join(elements) + "}"
+
+
+def tableau(valeurs) -> str:
+    """À passer en paramètre avec un cast explicite : `= any(%s::int[])`."""
+    return _litteral_tableau(list(valeurs))
+
+
+def _valeur_copie(v) -> str:
+    if v is None:
+        return "\\N"
+    if isinstance(v, bool):
+        return "t" if v else "f"
+    if isinstance(v, (list, tuple)):
+        return _echappe_copie(_litteral_tableau(v))
+    if isinstance(v, date):
+        return v.isoformat()
+    if isinstance(v, float):
+        return repr(v)
+    return _echappe_copie(str(v))
+
+
+def copier(c, table: str, colonnes: list, lignes) -> int:
+    """COPY de lignes dans une table : un seul texte de requête, quel que soit le volume."""
+    tampon = io.StringIO()
+    n = 0
+    for ligne in lignes:
+        tampon.write("\t".join(_valeur_copie(v) for v in ligne))
+        tampon.write("\n")
+        n += 1
+    tampon.seek(0)
+    c.copy_expert(f"copy {table} ({', '.join(colonnes)}) from stdin", tampon)
+    return n
+
+
 def _clean(v):
     """Postgres refuse NaN et Infinity en double precision : on les traite en absence."""
     if v is None:
@@ -225,11 +299,12 @@ _DONNEES = ["fiscal_year"] + FUND_COLS + ["accn", "filed", "inferred_zero", "q4_
 _CHANGE = (f"({', '.join('fundamentals.' + c for c in _DONNEES)}) is distinct from "
            f"({', '.join('excluded.' + c for c in _DONNEES)})")
 
+_COLS_ECRITES = ["cik", "period_end", "fiscal_period", "fiscal_year"] + FUND_COLS + [
+    "accn", "filed", "inferred_zero", "q4_derived", "scale_corrected"]
+
 _UPSERT_BASE = f"""
-insert into fundamentals
-  (cik, period_end, fiscal_period, fiscal_year, {', '.join(FUND_COLS)},
-   accn, filed, inferred_zero, q4_derived, scale_corrected)
-values %s
+insert into fundamentals ({', '.join(_COLS_ECRITES)})
+select {', '.join(_COLS_ECRITES)} from _fund_stage
 on conflict (cik, period_end, fiscal_period) do update set
   fiscal_year = excluded.fiscal_year,
   {_SET},
@@ -275,7 +350,11 @@ def upsert_fundamentals(cn, rows: Iterable, force: bool = False) -> int:
         return 0
     sql = UPSERT_FUNDAMENTALS_FORCE if force else UPSERT_FUNDAMENTALS
     with cn.cursor() as c:
-        X.execute_values(c, sql, payload, page_size=500)
+        c.execute("create temp table if not exists _fund_stage "
+                  "(like fundamentals including defaults) on commit drop")
+        c.execute("truncate _fund_stage")
+        copier(c, "_fund_stage", _COLS_ECRITES, payload)
+        c.execute(sql)
     return len(payload)
 
 
@@ -354,8 +433,7 @@ def upsert_prices_bulk(cn, mois: Iterable) -> int:
                   "(company_id smallint, ym date, d smallint[], c real[], v real[]) "
                   "on commit drop")
         c.execute("truncate _px_stage")
-        X.execute_values(c, "insert into _px_stage (company_id, ym, d, c, v) values %s",
-                         lignes, page_size=1000)
+        copier(c, "_px_stage", ["company_id", "ym", "d", "c", "v"], lignes)
         c.execute(MERGE_BULK)
     return len(lignes)
 
@@ -457,8 +535,8 @@ def mark_refreshed(cn, kind: str, ids: Iterable, on: Optional[date] = None) -> i
     if not ids:
         return 0
     with cn.cursor() as c:
-        c.execute(f"update companies set {col[0]} = %s where {col[1]} = any(%s)",
-                  (on or date.today(), ids))
+        c.execute(f"update companies set {col[0]} = %s where {col[1]} = any(%s::bigint[])",
+                  (on or date.today(), tableau(ids)))
         return c.rowcount
 
 
@@ -483,7 +561,7 @@ def price_coverage(cn, company_ids: list) -> dict:
                                 order by ym asc limit 1) debut
             cross join lateral (select ym from prices p where p.company_id = s.company_id
                                 order by ym desc limit 1) fin
-        """, (list(company_ids),))
+        """, (tableau(company_ids),))
         return {r[0]: (r[1], r[2]) for r in c.fetchall()}
 
 
@@ -500,8 +578,8 @@ def charger_fondamentaux(cn, ciks: list) -> dict:
         return {}
     cols = ["cik", "period_end", "fiscal_period"] + FUND_COLS
     with cn.cursor() as c:
-        c.execute(f"select {', '.join(cols)} from fundamentals where cik = any(%s) "
-                  f"order by cik, period_end", (list(ciks),))
+        c.execute(f"select {', '.join(cols)} from fundamentals where cik = any(%s::int[]) "
+                  f"order by cik, period_end", (tableau(ciks),))
         out: dict = {}
         for ligne in c.fetchall():
             r = dict(zip(cols, ligne))
@@ -518,9 +596,9 @@ def charger_cours(cn, company_ids: list, depuis: date) -> dict:
         c.execute("""
             select p.company_id, (p.ym + (t.j - 1))::date, t.c
             from prices p, unnest(p.d, p.c) as t(j, c)
-            where p.company_id = any(%s) and p.ym >= date_trunc('month', %s::date)::date
+            where p.company_id = any(%s::smallint[]) and p.ym >= date_trunc('month', %s::date)::date
             order by 1, 2
-        """, (list(company_ids), depuis))
+        """, (tableau(company_ids), depuis))
         out: dict = {}
         for cid, d, cl in c.fetchall():
             out.setdefault(cid, []).append((d.isoformat(), float(cl)))
@@ -545,38 +623,47 @@ def ecrire_metriques(cn, company_ids: list, lignes: list, series: list) -> None:
     """
     if not company_ids:
         return
-    ids = list(company_ids)
     with cn.cursor() as c:
-        if lignes:
-            X.execute_values(c, """
-                insert into metrics (company_id, as_of, metric_id, value, raison, is_applicable)
-                values %s
-                on conflict (company_id, metric_id) do update
-                  set value = excluded.value, raison = excluded.raison,
-                      is_applicable = excluded.is_applicable, as_of = excluded.as_of
-                  where (metrics.value, metrics.raison) is distinct from (excluded.value, excluded.raison)
-            """, [(cid, a, m, _clean(v), r, v is not None or r is None) for cid, a, m, v, r in lignes],
-                page_size=2000)
-            # Seules disparaissent les métriques qui ne sont plus produites pour la société.
-            c.execute("""
-                delete from metrics m
-                where m.company_id = any(%s)
-                  and (m.company_id, m.metric_id) not in (
-                      select * from unnest(%s::smallint[], %s::text[]))
-            """, (ids, [l[0] for l in lignes], [l[2] for l in lignes]))
-        if series:
-            propres = [(cid, m, p, _clean(v)) for cid, m, p, v in series if _clean(v) is not None]
-            X.execute_values(c, """
-                insert into metric_series (company_id, metric_id, period_end, value) values %s
-                on conflict (company_id, metric_id, period_end) do update set value = excluded.value
-                  where metric_series.value is distinct from excluded.value
-            """, propres, page_size=2000)
-            c.execute("""
-                delete from metric_series s
-                where s.company_id = any(%s)
-                  and (s.company_id, s.metric_id, s.period_end) not in (
-                      select * from unnest(%s::smallint[], %s::text[], %s::date[]))
-            """, (ids, [p[0] for p in propres], [p[1] for p in propres], [p[2] for p in propres]))
+        c.execute("create temp table if not exists _met_stage (company_id smallint, as_of date, "
+                  "metric_id text, value double precision, raison text, is_applicable boolean) "
+                  "on commit drop")
+        c.execute("create temp table if not exists _ser_stage (company_id smallint, metric_id text, "
+                  "period_end date, value double precision) on commit drop")
+        c.execute("create temp table if not exists _lot_ids (company_id smallint) on commit drop")
+        c.execute("truncate _met_stage, _ser_stage, _lot_ids")
+        copier(c, "_lot_ids", ["company_id"], [(i,) for i in company_ids])
+        copier(c, "_met_stage", ["company_id", "as_of", "metric_id", "value", "raison", "is_applicable"],
+               [(cid, a, m, _clean(v), r, v is not None or r is None) for cid, a, m, v, r in lignes])
+        copier(c, "_ser_stage", ["company_id", "metric_id", "period_end", "value"],
+               [(cid, m, p, _clean(v)) for cid, m, p, v in series if _clean(v) is not None])
+
+        c.execute("""
+            insert into metrics (company_id, as_of, metric_id, value, raison, is_applicable)
+            select company_id, as_of, metric_id, value, raison, is_applicable from _met_stage
+            on conflict (company_id, metric_id) do update
+              set value = excluded.value, raison = excluded.raison,
+                  is_applicable = excluded.is_applicable, as_of = excluded.as_of
+              where (metrics.value, metrics.raison) is distinct from (excluded.value, excluded.raison)
+        """)
+        # Seules disparaissent les métriques qui ne sont plus produites pour la société.
+        c.execute("""
+            delete from metrics m using _lot_ids l
+            where m.company_id = l.company_id
+              and not exists (select 1 from _met_stage s
+                              where s.company_id = m.company_id and s.metric_id = m.metric_id)
+        """)
+        c.execute("""
+            insert into metric_series (company_id, metric_id, period_end, value)
+            select company_id, metric_id, period_end, value from _ser_stage
+            on conflict (company_id, metric_id, period_end) do update set value = excluded.value
+              where metric_series.value is distinct from excluded.value
+        """)
+        c.execute("""
+            delete from metric_series s using _lot_ids l
+            where s.company_id = l.company_id
+              and not exists (select 1 from _ser_stage t where t.company_id = s.company_id
+                              and t.metric_id = s.metric_id and t.period_end = s.period_end)
+        """)
 
 
 def dernier_depot_ingere(cn, ciks: list) -> dict:
@@ -590,6 +677,6 @@ def dernier_depot_ingere(cn, ciks: list) -> dict:
     if not ciks:
         return {}
     with cn.cursor() as c:
-        c.execute("select cik, max(filed) from fundamentals where cik = any(%s) group by cik",
-                  (list(ciks),))
+        c.execute("select cik, max(filed) from fundamentals where cik = any(%s::int[]) group by cik",
+                  (tableau(ciks),))
         return dict(c.fetchall())
