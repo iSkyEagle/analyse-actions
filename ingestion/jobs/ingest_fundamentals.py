@@ -70,9 +70,14 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
                                   limit=limit, mappable_only=False)
     log.info("%d sociétés à traiter (source %s)", len(rows), provider.name)
 
-    n_rows, refreshed, ecartes = 0, [], 0
+    n_rows, refreshed, ecartes, inchangees = 0, [], 0, 0
+    # Dépôt le plus récent déjà ingéré, par lots de 200 CIK : une seule requête bornée
+    # par lot, au lieu d'en poser une par société.
+    deja: dict = {}
     with db.run(cn, "fundamentals", stamp) as r:
-        for company_id, cik, ticker, sic, profile, _ in rows:
+        for i, (company_id, cik, ticker, sic, profile, _) in enumerate(rows):
+            if i % 200 == 0:
+                deja = db.dernier_depot_ingere(cn, [x[1] for x in rows[i:i + 200]])
             issuer = Issuer(cik=cik, ticker=ticker, name=ticker, exchange="", sic=sic)
             try:
                 res = provider.get_fundamentals(issuer)
@@ -93,6 +98,16 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
                 r.fail(ticker=ticker, cik=cik, stage="map",
                        reason=type(e).__name__, detail=str(e))
                 continue
+            # Aucun dépôt nouveau depuis le dernier passage : rien à écrire. Le passage
+            # hebdomadaire relisait jusqu'ici 236 000 lignes pour en modifier quelques
+            # milliers, et a dépassé ses trois heures le 27 septembre. `--force` lève ce
+            # raccourci, pour appliquer un changement de logique d'extraction.
+            connu = deja.get(cik)
+            if not force and connu and res.last_filing and res.last_filing <= connu:
+                inchangees += 1
+                refreshed.append(cik)
+                r.ok()
+                continue
             try:
                 n_rows += db.upsert_fundamentals(cn, res.rows, force=force)
                 db.update_company_facts(cn, res, sic=sic)
@@ -106,12 +121,15 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
             if len(refreshed) % 200 == 0:
                 db.mark_refreshed(cn, "fundamentals", refreshed[-200:])
                 cn.commit()
-                log.info("  %d traitées, %d lignes", len(refreshed), n_rows)
+                log.info("  %d examinées, %d sans dépôt nouveau, %d lignes transmises",
+                         len(refreshed), inchangees, n_rows)
         db.mark_refreshed(cn, "fundamentals", refreshed)
         cn.commit()
 
-    log.info("%d sociétés, %d lignes fundamentals, %d écartées hors périmètre",
-             len(refreshed), n_rows, ecartes)
+    # « transmises » et non « écrites » : la garde d'identité de la base n'écrit que les
+    # lignes qui diffèrent réellement, et ce nombre-là n'est pas connu du client.
+    log.info("%d sociétés examinées, dont %d sans dépôt nouveau ; %d lignes transmises ; "
+             "%d écartées hors périmètre", len(refreshed), inchangees, n_rows, ecartes)
     provider.close()
     cn.close()
     return n_rows

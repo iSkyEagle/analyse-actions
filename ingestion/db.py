@@ -16,6 +16,7 @@ from typing import Iterable, Optional
 
 import psycopg2
 import psycopg2.extras as X
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 import mapping as M
 from providers.base import (FundamentalsResult, PriceSeries, ProviderError,
@@ -27,6 +28,22 @@ log = logging.getLogger(__name__)
 FUND_COLS = [n for n in M.STORED if not n.startswith("_")]
 
 
+def _signaler_tentative(etat) -> None:
+    log.warning("connexion refusée (%s), nouvelle tentative dans %.0f s — tentative %d",
+                type(etat.outcome.exception()).__name__, etat.next_action.sleep, etat.attempt_number)
+
+
+# Cinq nouvelles tentatives espacées de 15 s à 2 min, soit ~5 minutes au total.
+# Constaté : l'instance nano traverse des indisponibilités passagères, puis redevient
+# disponible — le backfill du 26 a réussi entre deux pannes. Sans ces tentatives, un
+# job tombé sur deux minutes d'indisponibilité échouait pour la nuit entière.
+# Seules les erreurs de CONNEXION sont réessayées : une requête qui échoue en cours de
+# job reste une erreur, le job suivant reprendra là où il s'est arrêté.
+@retry(retry=retry_if_exception_type(psycopg2.OperationalError),
+       stop=stop_after_attempt(6),
+       wait=wait_exponential(multiplier=15, min=15, max=120),
+       before_sleep=_signaler_tentative,
+       reraise=True)
 def connect(url: Optional[str] = None):
     cn = psycopg2.connect(url or database_url())
     cn.autocommit = False
@@ -560,3 +577,19 @@ def ecrire_metriques(cn, company_ids: list, lignes: list, series: list) -> None:
                   and (s.company_id, s.metric_id, s.period_end) not in (
                       select * from unnest(%s::smallint[], %s::text[], %s::date[]))
             """, (ids, [p[0] for p in propres], [p[1] for p in propres], [p[2] for p in propres]))
+
+
+def dernier_depot_ingere(cn, ciks: list) -> dict:
+    """
+    {cik: date du dépôt le plus récent déjà en base}, pour un lot.
+
+    Borné au lot par l'index de la clé primaire (cik en tête) : ne dépend pas de la
+    taille de la table. Sert à ne pas retraiter une société qui n'a rien déposé depuis
+    le dernier passage.
+    """
+    if not ciks:
+        return {}
+    with cn.cursor() as c:
+        c.execute("select cik, max(filed) from fundamentals where cik = any(%s) group by cik",
+                  (list(ciks),))
+        return dict(c.fetchall())
