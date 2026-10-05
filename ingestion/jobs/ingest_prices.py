@@ -8,7 +8,7 @@ Deux modes, une seule mécanique de fusion.
                    jours fériés et corrections rétroactives d'ajustement sont ainsi
                    repris sans traitement particulier, la fusion étant idempotente.
 
-  --mode backfill  complète l'historique jusqu'à `history_years`, société par société.
+  --mode backfill  reconstruit l'historique sur `history_years`, en le remplaçant.
                    Progressif : --limit permet d'étaler la reprise sur plusieurs
                    passages sans jamais tout retélécharger.
 
@@ -39,17 +39,41 @@ log = logging.getLogger("ingest.prices")
 FLUSH_MOIS = 5000
 
 
-def _flush(cn, tampon, run) -> int:
-    if not tampon:
-        return 0
+def _ecrire(cn, lot: list, run) -> tuple:
+    """
+    Écrit un lot de séries COMPLÈTES : (company_id, remplacer, mois, divisions, dividendes).
+
+    Une série n'est jamais coupée entre deux lots : remplacer l'historique d'une
+    société en deux fois effacerait la première moitié.
+
+    Renvoie (mois écrits, sociétés écrites, sociétés à reconstruire).
+    """
+    if not lot:
+        return 0, [], set()
+    remplaces = [cid for cid, rem, mois, _, _ in lot if rem and mois]
     try:
-        n = db.upsert_prices_bulk(cn, tampon)
+        nouvelles = db.ecrire_evenements(
+            cn,
+            [(cid, d, x) for cid, _, _, divs, _ in lot for d, x in divs],
+            [(cid, d, x) for cid, _, _, _, dvds in lot for d, x in dvds],
+            remplaces,
+        )
+        a_remplacer = [m for cid, rem, mois, _, _ in lot if rem for m in mois]
+        # Une société dont une division vient d'apparaître n'est PAS fusionnée : ses
+        # nouveaux cours sont en unités post-division, son historique stocké non.
+        a_fusionner = [m for cid, rem, mois, _, _ in lot if not rem and cid not in nouvelles for m in mois]
+        n = 0
+        if a_remplacer:
+            n += db.remplacer_cours(cn, remplaces, a_remplacer)
+        if a_fusionner:
+            n += db.upsert_prices_bulk(cn, a_fusionner)
         cn.commit()
-        return n
     except Exception as e:                      # un paquet perdu n'arrête pas le job
         cn.rollback()
-        run.fail(stage="upsert", reason=type(e).__name__, detail=str(e))
-        return 0
+        run.fail(stage="ecriture", reason=type(e).__name__, detail=str(e))
+        return 0, [], set()
+    ecrites = [cid for cid, rem, mois, _, _ in lot if mois and (rem or cid not in nouvelles)]
+    return n, ecrites, nouvelles
 
 
 def _target_start(history_years: int, today: date) -> date:
@@ -58,27 +82,29 @@ def _target_start(history_years: int, today: date) -> date:
 
 def plan_backfill(cn, rows, today: date) -> dict:
     """
-    Détermine, par société, la fenêtre manquante en amont de l'historique existant.
+    Sociétés à reconstruire, et leur fenêtre : toute la profondeur visée.
 
-    Les sociétés déjà couvertes sont écartées du plan : c'est ce qui rend le backfill
-    reprenable et borné, au lieu de retélécharger l'univers à chaque passage.
+    Une société déjà reconstruite sort du plan d'elle-même : le curseur est la donnée,
+    ce qui rend le backfill reprenable et borné.
     """
-    coverage = db.price_coverage(cn, [r[0] for r in rows])
+    ids = [r[0] for r in rows]
+    coverage = db.price_coverage(cn, ids)
+    reconstruire = db.a_reconstruire(cn, ids)
     plan = {}
     for company_id, cik, ticker, sic, profile, history_years in rows:
         target = _target_start(history_years, today)
         have = coverage.get(company_id)
-        if have is None:
-            plan[ticker] = (company_id, target, today)
-        elif have[0] > target:
-            # Seulement la plage MANQUANTE, jusqu'au premier mois stocké plus un mois de
-            # recouvrement pour ne pas laisser de trou. Une version précédente allait
-            # jusqu'à aujourd'hui pour partager une même fenêtre entre sociétés : elle
-            # réécrivait ~60 mois déjà stockés par société complétée, soit autant de
-            # versions de lignes à nettoyer, sur une instance déjà saturée en disque.
-            # Les appels restent groupés : la plupart des sociétés ont commencé à la même
-            # date lors du premier backfill, elles partagent donc la même fenêtre.
-            plan[ticker] = (company_id, target, have[0] + timedelta(days=31))
+        # Reconstruction : historique encore ajusté des dividendes, nouvelle division, ou
+        # profondeur visée relevée. Toute la profondeur visée est téléchargée et
+        # l'historique stocké REMPLACÉ : ce qui revient est, par construction, tout ce
+        # qui existe. Une société reconstruite est donc complète, quel que soit son âge.
+        #
+        # Il n'y a plus de mode « plage manquante ». Il jugeait incomplète toute société
+        # introduite depuis moins de dix ans — son historique commence forcément après
+        # la profondeur visée — et la retéléchargeait chaque nuit, sans fin : le
+        # compteur de sociétés à compléter ne pouvait jamais atteindre zéro.
+        if company_id in reconstruire or have is None:
+            plan[ticker] = (company_id, target, today, True)
     return plan
 
 
@@ -102,6 +128,8 @@ def run(mode: str, limit: int | None, window_days: int, dry_run: bool,
     # toujours les 500 mêmes qui étaient choisies. Une fois celles-ci complètes, le
     # backfill ne trouvait plus rien à faire et les ~2 400 autres n'atteignaient jamais
     # leur profondeur visée. Le bon critère est l'historique manquant, pas la fraîcheur.
+    db.assurer_indices(cn)
+    cn.commit()
     limite_selection = None if mode == "backfill" else limit
     rows = db.select_universe(cn, in_universe=(scope == "universe"),
                               stale_first="prices", limit=limite_selection)
@@ -112,7 +140,9 @@ def run(mode: str, limit: int | None, window_days: int, dry_run: bool,
     if not rows:
         log.warning("aucun candidat en base — lancer d'abord ingest_universe")
         return 0
-    log.info("scope %s : %d sociétés", scope, len(rows))
+    if scope == "universe":
+        rows = rows + db.lignes_indices(cn)      # ^GSPC et ^SP500TR, hors univers par nature
+    log.info("scope %s : %d séries", scope, len(rows))
 
     if mode == "daily":
         # Une fenêtre fixe de 7 jours laisse un trou dès que le job saute plus d'une
@@ -126,24 +156,26 @@ def run(mode: str, limit: int | None, window_days: int, dry_run: bool,
                     today - timedelta(days=90))
         if start < today - timedelta(days=window_days):
             log.info("rattrapage : la fenêtre remonte au %s", start)
-        plan = {r[2]: (r[0], start, today) for r in rows}
+        plan = {r[2]: (r[0], start, today, False) for r in rows}
     else:
         complet = plan_backfill(cn, rows, today)
         # Ordre déterministe par identifiant : les identifiants suivent l'ordre du fichier
         # SEC à la création, trié par capitalisation décroissante, donc les grandes
         # valeurs passent en premier. Une société complétée sort d'elle-même du plan :
         # le curseur est la donnée, aucun état à conserver entre deux passages.
-        ordre = sorted(complet.items(), key=lambda kv: kv[1][0])
+        # Reconstructions d'abord, puis par identifiant : les grandes valeurs en premier.
+        ordre = sorted(complet.items(), key=lambda kv: (not kv[1][3], kv[1][0]))
         plan = dict(ordre[:limit] if limit else ordre)
-        log.info("backfill : %d sociétés à l'historique incomplet sur %d examinées, "
-                 "%d traitées ce passage", len(complet), len(rows), len(plan))
+        n_rec = sum(1 for v in complet.values() if v[3])
+        log.info("backfill : %d sociétés à traiter sur %d examinées, dont %d à reconstruire ; "
+                 "%d traitées ce passage", len(complet), len(rows), n_rec, len(plan))
 
     if not plan:
         log.info("rien à faire")
         return 0
     if dry_run:
-        for t, (_, s, e) in list(plan.items())[:10]:
-            log.info("  %-8s %s -> %s", t, s, e)
+        for t, (_, s, e, rem) in list(plan.items())[:10]:
+            log.info("  %-8s %s -> %s%s", t, s, e, "  (reconstruction)" if rem else "")
         log.info("... %d sociétés au total (dry-run)", len(plan))
         return 0
 
@@ -151,37 +183,34 @@ def run(mode: str, limit: int | None, window_days: int, dry_run: bool,
     # fenêtre identique pour préserver l'appel groupé : un lot par fenêtre, jamais
     # un appel par ticker.
     groups: dict = {}
-    for ticker, (company_id, start, end) in plan.items():
+    for ticker, (company_id, start, end, remplacer) in plan.items():
         groups.setdefault((start, end), []).append(ticker)
 
-    done, months, refreshed = 0, 0, []
+    done, months, refreshed, a_refaire = 0, 0, [], set()
     with db.run(cn, f"prices_{mode}", provider.name) as r:
         for (start, end), tickers in groups.items():
-            log.info("fenêtre %s -> %s : %d sociétés, par lots de %d",
+            log.info("fenêtre %s -> %s : %d séries, par lots de %d",
                      start, end, len(tickers), provider.max_batch)
-            # Les mois sont accumulés puis écrits par paquets. Écrire société par
-            # société faisait un appel de fonction par mois — ~270 000 sur un backfill
-            # complet, de quoi épuiser les crédits CPU d'une instance gratuite.
-            tampon, en_attente = [], []
+            lot, n_mois = [], 0
             for series in provider.get_price_history(tickers, start, end):
                 if not series.ok:
                     r.fail(ticker=series.ticker, stage="fetch", reason=series.reason)
                     continue
-                tampon.extend(db._months_of(plan[series.ticker][0], series))
-                en_attente.append(plan[series.ticker][0])
+                cid, _, _, remplacer = plan[series.ticker]
+                mois = db._months_of(cid, series)
+                lot.append((cid, remplacer, mois, series.splits, series.dividends))
+                n_mois += len(mois)
                 r.ok()
                 done += 1
-                if len(tampon) >= FLUSH_MOIS:
-                    n = _flush(cn, tampon, r)
-                    months += n
-                    if n:                       # marqué rafraîchi seulement si écrit
-                        refreshed.extend(en_attente)
-                    tampon, en_attente = [], []
-            n = _flush(cn, tampon, r)
-            months += n
-            if n:
-                refreshed.extend(en_attente)
-            cn.commit()
+                if n_mois >= FLUSH_MOIS:
+                    n, ecrites, nouvelles = _ecrire(cn, lot, r)
+                    months, refreshed, a_refaire = months + n, refreshed + ecrites, a_refaire | nouvelles
+                    lot, n_mois = [], 0
+            n, ecrites, nouvelles = _ecrire(cn, lot, r)
+            months, refreshed, a_refaire = months + n, refreshed + ecrites, a_refaire | nouvelles
+        if a_refaire:
+            log.warning("division détectée chez %d société(s) : cours non fusionnés, historique "
+                        "à reconstruire au prochain backfill", len(a_refaire))
         db.mark_refreshed(cn, "prices", refreshed)
         n = db.refresh_market_caps(cn)
         cn.commit()

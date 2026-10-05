@@ -67,6 +67,11 @@ def index_facts(companyfacts: dict):
     """
     idx = defaultdict(dict)
     seen_tags = set()
+    # Première publication de chaque période : le dépôt le PLUS ANCIEN qui la cite, tous
+    # concepts confondus. La déduplication ci-dessous garde au contraire le plus récent,
+    # qui peut dater de deux ans après — un 10-K présente trois exercices. Mesuré chez
+    # Microsoft : exercice 2023 publié le 27 juillet 2023, redéposé jusqu'en 2025.
+    premieres = {}
     gaap = companyfacts.get("facts", {}).get("us-gaap", {})
     for tag, node in gaap.items():
         seen_tags.add(tag)
@@ -80,11 +85,14 @@ def index_facts(companyfacts: dict):
                 if kind is None:
                     continue
                 key = (kind, e["end"], e.get("start"))
+                pk = (kind, e["end"])
+                if pk not in premieres or e["filed"] < premieres[pk]:
+                    premieres[pk] = e["filed"]
                 prev = idx[tag].get(key)
                 # Retraitement : le dépôt le plus récent l'emporte.
                 if prev is None or (e["filed"], e["accn"]) > (prev["filed"], prev["accn"]):
                     idx[tag][key] = e
-    return idx, seen_tags
+    return idx, seen_tags, premieres
 
 
 MIN_CONCEPTS_PER_PERIOD = 10   # une clôture réelle est balisée par des dizaines de concepts
@@ -236,6 +244,10 @@ def _resolve_period(idx, profile, kind, end, start, log, period_label):
         log.mixed_accession += 1
     primary = max(provenance.values(), key=lambda p: p[2])[1] if provenance else None
     filed = max((p[2] for p in provenance.values()), default=None)
+    # Dépôt d'où vient le nombre d'actions dilué. Un dépôt postérieur à une division
+    # d'actions retraite les exercices qu'il présente ; un dépôt antérieur, non. Cette
+    # date permet de ramener chaque nombre d'actions sur la base actuelle (étape 4c).
+    values["_shares_filed"] = provenance["shares_diluted"][2] if "shares_diluted" in provenance else None
     return values, primary, filed, len(accns)
 
 
@@ -341,27 +353,29 @@ def _fix_scale(rows, log):
 def extract(companyfacts: dict, cik: int, ticker: str, profile: str):
     """Retourne (lignes, log). Une ligne = un dict prêt pour l'upsert `fundamentals`."""
     log = ExtractionLog(cik=cik, ticker=ticker, profile=profile)
-    idx, seen = index_facts(companyfacts)
+    idx, seen, premieres = index_facts(companyfacts)
     periods = _periods(idx)
 
     fy_ends = sorted({end for (k, end) in periods if k == "FY"})
     q_ends = sorted({end for (k, end) in periods if k == "Q"})
     log.fiscal_years = len(fy_ends)
 
+    by_end, meta = {}, {}
+    for kind, ends in (("FY", fy_ends), ("Q", q_ends)):
+        for end in ends:
+            starts = tuple(sorted(s for s in periods[(kind, end)] if s)) or (None,)
+            vals, accn, filed, n_accn = _resolve_period(idx, profile, kind, end, starts, log, f"{kind} {end}")
+            by_end[(kind, end)] = vals
+            meta[(kind, end)] = (accn, filed, n_accn)
+
+    _reconstituer_trimestres(idx, profile, periods, by_end, q_ends, cik, ticker)
+
     rows = []
-    by_end = {}
-    for end in fy_ends:
-        starts = tuple(sorted(s for s in periods[("FY", end)] if s)) or (None,)
-        vals, accn, filed, n_accn = _resolve_period(idx, profile, "FY", end, starts, log, f"FY {end}")
-        by_end[("FY", end)] = vals
-        rows.append(dict(vals, cik=cik, period_end=end, fiscal_period="FY",
-                         accn=accn, filed=filed, n_accessions=n_accn))
-    for end in q_ends:
-        starts = tuple(sorted(s for s in periods[("Q", end)] if s)) or (None,)
-        vals, accn, filed, n_accn = _resolve_period(idx, profile, "Q", end, starts, log, f"Q {end}")
-        by_end[("Q", end)] = vals
-        rows.append(dict(vals, cik=cik, period_end=end, fiscal_period="Q",
-                         accn=accn, filed=filed, n_accessions=n_accn))
+    for (kind, end), vals in by_end.items():
+        accn, filed, n_accn = meta[(kind, end)]
+        rows.append(dict(vals, cik=cik, period_end=end, fiscal_period=kind,
+                         accn=accn, filed=filed, n_accessions=n_accn,
+                         first_filed=premieres.get((kind, end))))
 
     # Q4 reconstruit
     for end in fy_ends:
@@ -371,13 +385,15 @@ def extract(companyfacts: dict, cik: int, ticker: str, profile: str):
         for (k, e), starts in periods.items():
             if k == "M9" and e < end and _days(e, end) < 100:
                 st = tuple(sorted(x for x in starts if x)) or (None,)
-                m9, _, _, _ = _resolve_period(idx, profile, "M9", e, st, log, f"M9 {e}")
+                m9, _, _, _ = _resolve_period(idx, profile, "M9", e, st, _journal_muet(cik, ticker, profile), f"M9 {e}")
                 break
         qs = [by_end[("Q", e)] for e in q_ends if e < end and _days(e, end) < 295]
         q4 = _derive_q4(by_end[("FY", end)], m9, qs[-3:] if len(qs) >= 3 else None)
         if any(q4.get(n) is not None for n in ("revenue", "net_income")):
+            # Le Q4 devient public avec le 10-K : il hérite de sa première publication.
             rows.append(dict(q4, cik=cik, period_end=end, fiscal_period="Q",
-                             accn=None, filed=None, n_accessions=0, q4_derived=True))
+                             accn=None, filed=None, n_accessions=0, q4_derived=True,
+                             first_filed=premieres.get(("FY", end))))
 
     _fix_scale(rows, log)
     log.periods = len(rows)
@@ -388,6 +404,88 @@ def extract(companyfacts: dict, cik: int, ticker: str, profile: str):
         t for t in seen if t not in mapped and len(idx.get(t, {})) >= 8
     )
     return rows, log
+
+
+# Champs de flux additifs : la différence de deux cumuls a un sens. Les champs
+# calculés (EBITDA, flux libre) sont recalculés après coup à partir de leurs composants.
+_CALCULES = {"ebitda", "fcf"}
+
+
+def _journal_muet(cik, ticker, profile):
+    """Journal jetable : les cumuls intermédiaires ne doivent pas fausser les statistiques."""
+    return ExtractionLog(cik=cik, ticker=ticker, profile=profile)
+
+
+def _reconstituer_trimestres(idx, profile, periods, by_end, q_ends, cik, ticker):
+    """
+    Reconstitue les flux des T2 et T3 par différence de cumuls.
+
+    Dans un 10-Q, le tableau des flux de trésorerie est cumulé depuis le début de
+    l'exercice — six mois, neuf mois —, jamais trimestriel. Les T2 et T3 n'avaient donc
+    ni flux d'exploitation, ni investissements, ni dividendes, ni rachats, ni
+    amortissements, donc ni flux libre ni EBITDA, et les flux sur douze mois retombaient
+    sur l'exercice annuel, jusqu'à neuf mois de retard.
+
+      T2 = cumul 6 mois − T1             (même début d'exercice)
+      T3 = cumul 9 mois − cumul 6 mois   (même début d'exercice)
+
+    Seuls les champs ABSENTS du trimestre sont reconstitués : une valeur publiée en
+    trois mois n'est jamais remplacée. Les champs ainsi obtenus sont tracés.
+    """
+    additifs = [n for n in M.ORDER if M.BY_NAME[n].kind == M.FLOW and n not in NON_ADDITIVE
+                and n != "eps_diluted" and n not in _CALCULES and M.applicable(n, profile)]
+    journal = _journal_muet(cik, ticker, profile)
+    cache = {}
+
+    def cumul(kind, end):
+        if (kind, end) not in cache:
+            starts = sorted(s for s in periods.get((kind, end), ()) if s)
+            if not starts:
+                cache[(kind, end)] = None
+            else:
+                v, _, _, _ = _resolve_period(idx, profile, kind, end, tuple(starts), journal, f"{kind} {end}")
+                cache[(kind, end)] = (starts, v)
+        return cache[(kind, end)]
+
+    def alignes(debuts_a, debuts_b):
+        # Même début d'exercice, à une semaine près (clôtures en semaines fiscales).
+        return any(abs(_days(a, b)) <= 10 for a in debuts_a for b in debuts_b)
+
+    def precedent(end):
+        return next((e for e in reversed(q_ends) if e < end and 80 <= _days(e, end) <= 100), None)
+
+    for end in q_ends:
+        vals = by_end[("Q", end)]
+        manquants = [n for n in additifs if vals.get(n) is None]
+        if not manquants:
+            continue
+        avant = precedent(end)
+        if avant is None:
+            continue
+        haut, bas = None, None
+        h1 = cumul("H1", end)
+        if h1 is not None:
+            debuts_t1 = sorted(s for s in periods.get(("Q", avant), ()) if s)
+            if alignes(h1[0], debuts_t1):
+                haut, bas = h1[1], by_end[("Q", avant)]          # T2 = 6 mois − T1
+        if haut is None:
+            m9, h1_avant = cumul("M9", end), cumul("H1", avant)
+            if m9 is not None and h1_avant is not None and alignes(m9[0], h1_avant[0]):
+                haut, bas = m9[1], h1_avant[1]                    # T3 = 9 mois − 6 mois
+        if haut is None:
+            continue
+        obtenus = []
+        for n in manquants:
+            if haut.get(n) is not None and bas.get(n) is not None:
+                vals[n] = haut[n] - bas[n]
+                obtenus.append(n)
+        for n in _CALCULES:
+            if vals.get(n) is None and M.applicable(n, profile):
+                v = M.BY_NAME[n].derive(vals)
+                if v is not None:
+                    vals[n] = v
+                    obtenus.append(n)
+        vals["_ytd_derived"] = sorted(obtenus)
 
 
 def data_quality_score(rows, profile: str) -> float:

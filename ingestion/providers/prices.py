@@ -73,10 +73,15 @@ class YFinanceProvider(PriceProvider):
         for i in range(0, len(uniq), self.max_batch):
             batch = uniq[i:i + self.max_batch]
             try:
+                # auto_adjust=False : la colonne Close est ajustée des DIVISIONS SEULES.
+                # Ajustée aussi des dividendes, elle minorait les cours passés d'autant
+                # plus que le rendement est élevé — 10 % sur trois ans pour Coca-Cola —
+                # et biaisait vers « cher » la médiane historique des multiples.
+                # actions=True : divisions et dividendes par action dans le même appel.
                 df = self._yf.download(
                     batch, start=start, end=end, interval="1d",
-                    auto_adjust=True, progress=False, threads=True,
-                    group_by="column", actions=False,
+                    auto_adjust=False, progress=False, threads=True,
+                    group_by="column", actions=True,
                 )
             except Exception as e:
                 # Lot entier perdu : on rend un échec par ticker plutôt que de lever,
@@ -112,8 +117,16 @@ class YFinanceProvider(PriceProvider):
                         (d.date() if hasattr(d, "date") else d, float(c), float(x))
                         for d, c, x in zip(s.index, s.to_numpy(), v.to_numpy())
                     ]
+                    splits, dividendes = [], []
+                    for nom, cible in (("Stock Splits", splits), ("Dividends", dividendes)):
+                        try:
+                            col = _colonne(df, nom, t).reindex(s.index).fillna(0)
+                        except KeyError:
+                            continue
+                        cible.extend((d.date() if hasattr(d, "date") else d, float(x))
+                                     for d, x in zip(col.index, col.to_numpy()) if x and x > 0)
                 except Exception as e:
                     yield PriceSeries(t, [], ok=False,
                                       reason=f"décodage: {type(e).__name__}: {str(e)[:80]}")
                     continue
-                yield PriceSeries(t, days)
+                yield PriceSeries(t, days, splits=splits, dividends=dividendes)

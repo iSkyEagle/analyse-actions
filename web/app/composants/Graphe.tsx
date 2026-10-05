@@ -52,9 +52,12 @@ const fmtDate = (d: string) => {
 export default function Graphe({
   points,
   profondeurVisee,
+  reconstruit = false,
 }: {
   points: PointCours[];
   profondeurVisee: number;
+  /** Historique reconstruit sur la base « ajustée des seules divisions » (étape 4b). */
+  reconstruit?: boolean;
 }) {
   const conteneur = useRef<HTMLDivElement>(null);
   const graphe = useRef<IChartApi | null>(null);
@@ -175,13 +178,17 @@ export default function Graphe({
   }
 
   const incomplet = anneesDispo < profondeurVisee - 0.5;
+  // Dix ans est la limite conservée (mémoire, §4). Quand elle est atteinte, « Tout »
+  // montrerait exactement la même chose que « 10 ans », tout en laissant croire à
+  // l'histoire entière de la société : le bouton disparaît, la légende le dit.
+  const toutRedondant = disponible(10);
   const resume = `Cours de clôture ajusté du ${fmtDate(premier!)} au ${fmtDate(dernier![0])}, `
     + `dernière clôture ${dernier![1].toLocaleString("fr-FR", { maximumFractionDigits: precision })} dollars.`;
 
   return (
     <figure>
       <div className="mb-3 flex flex-wrap gap-1" role="group" aria-label="Période affichée">
-        {PLAGES.map((p) => {
+        {PLAGES.filter((p) => !(p.id === "tout" && toutRedondant)).map((p) => {
           const indisponible = !disponible(p.ans);
           return (
             <button
@@ -203,10 +210,15 @@ export default function Graphe({
       <div ref={conteneur} role="img" aria-label={resume} className="h-72 w-full sm:h-96" />
 
       <figcaption className="mt-2 text-sm text-encre-seconde">
-        Clôture ajustée des dividendes et des divisions d'actions. Historique disponible
+        {reconstruit
+          ? "Clôture ajustée des divisions d'actions."
+          : "Clôture ajustée des dividendes et des divisions d'actions."} Historique disponible
         du {fmtDate(premier!)} au {fmtDate(dernier![0])}.
-        {incomplet && (
-          <> Historique en cours d'approfondissement : {duree(anneesDispo)} disponible
+        {toutRedondant && " Dix ans de cours au plus sont conservés."}
+        {/* Une fois reconstruit, l'historique est tout ce qui existe : une société plus
+            jeune que la profondeur visée n'a rien de plus à attendre. */}
+        {incomplet && !reconstruit && (
+          <> Historique en cours de reconstruction : {duree(anneesDispo)} disponible
             {anneesDispo < 2 ? "" : "s"} sur {profondeurVisee} visés, complété au fil des nuits.</>
         )}
       </figcaption>

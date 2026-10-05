@@ -86,6 +86,15 @@
    "note": ""
   },
   {
+   "id": "prix_ffo",
+   "libelle": "Prix sur FFO",
+   "axe": "valorisation",
+   "format": "multiple",
+   "serie": false,
+   "perte": false,
+   "note": "capitalisation / (résultat net + amortissements) des 12 derniers mois"
+  },
+  {
    "id": "peg_historique",
    "libelle": "PER sur croissance passée",
    "axe": "valorisation",

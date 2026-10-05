@@ -78,6 +78,9 @@ class FundamentalsRow:
     inferred_zero: list = field(default_factory=list)
     q4_derived: bool = False
     scale_corrected: list = field(default_factory=list)
+    first_filed: Optional[date] = None    # première publication de la période (point-in-time)
+    shares_filed: Optional[date] = None   # dépôt d'où vient le nombre d'actions dilué
+    ytd_derived: list = field(default_factory=list)   # champs obtenus par différence de cumuls
 
 
 @dataclass
@@ -97,9 +100,11 @@ class FundamentalsResult:
 @dataclass
 class PriceSeries:
     ticker: str
-    days: list                    # [(date, close_adj, volume)], croissant
+    days: list                    # [(date, clôture ajustée des seules divisions, volume)], croissant
     ok: bool = True
     reason: str = ""
+    splits: list = field(default_factory=list)      # [(date, ratio)] — 10.0 pour une division par 10
+    dividends: list = field(default_factory=list)   # [(date, montant par action)]
 
 
 # =============================================================================

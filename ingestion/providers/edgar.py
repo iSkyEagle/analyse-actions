@@ -127,6 +127,9 @@ class _EdgarBase(FundamentalsProvider):
                 accn=r.get("accn"),
                 filed=_d(r.get("filed")),
                 inferred_zero=r.get("_inferred_zero") or [],
+                first_filed=_d(r.get("first_filed")),
+                shares_filed=_d(r.get("_shares_filed")),
+                ytd_derived=r.get("_ytd_derived") or [],
                 q4_derived=bool(r.get("q4_derived")),
                 scale_corrected=r.get("_scale_corrected") or [],
             )

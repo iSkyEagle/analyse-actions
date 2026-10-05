@@ -25,6 +25,7 @@ export type Societe = {
   fiscal_years_available: number | null;
   in_universe: boolean;
   prices_refreshed_at: string | null;
+  prices_rebuilt_at: string | null;
   fundamentals_refreshed_at: string | null;
   last_xbrl_filing: string | null;
 };
@@ -59,7 +60,7 @@ export async function societe(ticker: string): Promise<Societe | null> {
             mapping_profile::text as mapping_profile,
             market_cap, market_cap_as_of, market_cap_uncertain,
             data_quality_score, fiscal_years_available, in_universe,
-            prices_refreshed_at, fundamentals_refreshed_at, last_xbrl_filing
+            prices_refreshed_at, prices_rebuilt_at, fundamentals_refreshed_at, last_xbrl_filing
      from companies
      where ticker = upper($1)
         or regexp_replace(ticker, '[^A-Z0-9]', '', 'g')
@@ -154,6 +155,9 @@ export async function listeSocietes(): Promise<[string, string, number, 0 | 1, n
     `select ticker as t, name as n, cik as c, in_universe as u,
             round(log(greatest(coalesce(median_dollar_volume_3m, 1), 1))::numeric, 1)::float8 as l
      from companies
+     -- Les indices de référence n'ont pas de CIK : la recherche, qui regroupe par CIK,
+     -- les fusionnerait en une seule entrée. Ils y entreront avec la comparaison.
+     where cik is not null
      order by ticker`,
   );
   return lignes.map((r) => [r.t, r.n, r.c, r.u ? 1 : 0, r.l ?? 0]);

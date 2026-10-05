@@ -37,10 +37,15 @@ def passe_a(cn, skip_sic: bool, limit_sic: int | None) -> int:
         db.upsert_companies(cn, cands,
                             profiles={i.ticker: M.profile_from_sic(i.sic) for i in cands})
         with cn.cursor() as c:
-            X.execute_values(c,
-                "update companies set last_xbrl_filing = v.d::date, sic = v.s::smallint "
-                "from (values %s) as v(t, d, s) where companies.ticker = v.t",
-                [(i.ticker, filings.last[i.cik][0], i.sic) for i in cands], page_size=1000)
+            # Par COPY et table de transit : texte de requête constant (mémoire, §4).
+            c.execute("create temp table if not exists _depot_stage (t text, d date, s smallint) "
+                      "on commit drop")
+            c.execute("truncate _depot_stage")
+            db.copier(c, "_depot_stage", ["t", "d", "s"],
+                      [(i.ticker, filings.last[i.cik][0], i.sic) for i in cands])
+            c.execute("update companies set last_xbrl_filing = v.d, sic = v.s "
+                      "from _depot_stage v where companies.ticker = v.t "
+                      "and (companies.last_xbrl_filing, companies.sic) is distinct from (v.d, v.s)")
         r.ok(len(cands))
         cn.commit()
     edgar.close()

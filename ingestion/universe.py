@@ -226,9 +226,19 @@ update companies c set
     ),
     history_years = case when coalesce(c.market_cap, 0) >= %(display_floor)s
                          then 10 else 5 end,
+    -- Profondeur visée en HAUSSE (franchissement des 300 M$) : l'historique doit être
+    -- reconstruit à la nouvelle profondeur. Dans un UPDATE, c.history_years désigne
+    -- encore l'ancienne valeur. En baisse, rien à faire : le stockage ne plafonne rien.
+    prices_rebuilt_at = case
+        when (case when coalesce(c.market_cap, 0) >= %(display_floor)s then 10 else 5 end)
+             > c.history_years then null
+        else c.prices_rebuilt_at end,
     updated_at = now()
 from fenetre f
 where f.company_id = c.company_id
+  -- Les indices de référence n'ont pas de capitalisation : sans cette exclusion, ils
+  -- seraient ramenés à cinq ans d'historique dès le premier du mois.
+  and c.mapping_profile::text <> 'index'
 """
 
 # Une société sans aucune séance sur trois mois n'apparaît pas dans `fenetre` et ne

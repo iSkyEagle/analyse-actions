@@ -224,14 +224,23 @@ def upsert_companies(cn, issuers, profiles: dict = None) -> dict:
     rows = [(i.cik, i.ticker, i.name[:200], i.exchange,
              profiles.get(i.ticker, "standard")) for i in issuers]
     with cn.cursor() as c:
-        X.execute_values(c, """
-            insert into companies (cik, ticker, name, exchange, mapping_profile) values %s
+        c.execute("create temp table if not exists _cmp_stage (cik int, ticker text, name text, "
+                  "exchange text, mapping_profile text) on commit drop")
+        c.execute("truncate _cmp_stage")
+        copier(c, "_cmp_stage", ["cik", "ticker", "name", "exchange", "mapping_profile"], rows)
+        # `updated_at` exclu de la comparaison : c'est lui qui rendait chaque ligne
+        # « différente », et les 4 816 lignes étaient réécrites chaque mois.
+        c.execute("""
+            insert into companies (cik, ticker, name, exchange, mapping_profile)
+            select cik, ticker, name, exchange, mapping_profile::mapping_profile_t from _cmp_stage
             on conflict (ticker) do update
               set cik = excluded.cik, name = excluded.name,
                   exchange = excluded.exchange,
                   mapping_profile = excluded.mapping_profile,
                   updated_at = now()
-        """, rows, page_size=1000)
+              where (companies.cik, companies.name, companies.exchange, companies.mapping_profile)
+                    is distinct from (excluded.cik, excluded.name, excluded.exchange, excluded.mapping_profile)
+        """)
         c.execute("select ticker, company_id from companies")
         return dict(c.fetchall())
 
@@ -276,11 +285,15 @@ def refresh_market_caps(cn) -> int:
               from recent r, unnest(r.d, r.c, r.v) as t(day, close_adj, volume)
               order by r.company_id, dt desc
             ),
-            multi as (select cik from companies group by cik having count(*) > 1)
+            -- CIK nul exclu, et `exists` plutôt que `in` : les indices de référence n'ont
+            -- pas de CIK, et `x in (liste contenant NULL)` vaut NULL — pas faux — pour
+            -- toute valeur absente de la liste. Le recalcul plantait alors sur la
+            -- contrainte non nulle de market_cap_uncertain, pour TOUTES les sociétés.
+            multi as (select cik from companies where cik is not null group by cik having count(*) > 1)
             update companies c set
               market_cap = c.shares_outstanding * d.close_adj,
               market_cap_as_of = d.dt,
-              market_cap_uncertain = (c.cik in (select cik from multi)),
+              market_cap_uncertain = exists (select 1 from multi m where m.cik = c.cik),
               updated_at = now()
             from dernier d
             where d.company_id = c.company_id and c.shares_outstanding is not null
@@ -295,12 +308,14 @@ _SET = ", ".join(f"{c} = excluded.{c}" for c in FUND_COLS)
 
 # Colonnes dont un changement justifie une réécriture. `ingested_at` n'en fait pas
 # partie : c'est précisément lui qui changeait à chaque passage.
-_DONNEES = ["fiscal_year"] + FUND_COLS + ["accn", "filed", "inferred_zero", "q4_derived", "scale_corrected"]
+_DONNEES = ["fiscal_year"] + FUND_COLS + ["accn", "filed", "inferred_zero", "q4_derived", "scale_corrected",
+                                         "first_filed", "shares_filed", "ytd_derived"]
 _CHANGE = (f"({', '.join('fundamentals.' + c for c in _DONNEES)}) is distinct from "
            f"({', '.join('excluded.' + c for c in _DONNEES)})")
 
 _COLS_ECRITES = ["cik", "period_end", "fiscal_period", "fiscal_year"] + FUND_COLS + [
-    "accn", "filed", "inferred_zero", "q4_derived", "scale_corrected"]
+    "accn", "filed", "inferred_zero", "q4_derived", "scale_corrected",
+    "first_filed", "shares_filed", "ytd_derived"]
 
 _UPSERT_BASE = f"""
 insert into fundamentals ({', '.join(_COLS_ECRITES)})
@@ -313,6 +328,9 @@ on conflict (cik, period_end, fiscal_period) do update set
   inferred_zero = excluded.inferred_zero,
   q4_derived = excluded.q4_derived,
   scale_corrected = excluded.scale_corrected,
+  first_filed = excluded.first_filed,
+  shares_filed = excluded.shares_filed,
+  ytd_derived = excluded.ytd_derived,
   ingested_at = now()
 """
 
@@ -343,7 +361,8 @@ def upsert_fundamentals(cn, rows: Iterable, force: bool = False) -> int:
         tuple([r.cik, r.period_end, r.fiscal_period, r.period_end.year]
               + [_clean(r.values.get(col)) for col in FUND_COLS]
               + [r.accn, r.filed, list(r.inferred_zero or []), bool(r.q4_derived),
-                 list(getattr(r, "scale_corrected", None) or [])])
+                 list(getattr(r, "scale_corrected", None) or []),
+                 r.first_filed, r.shares_filed, list(r.ytd_derived or [])])
         for r in rows
     ]
     if not payload:
@@ -680,3 +699,114 @@ def dernier_depot_ingere(cn, ciks: list) -> dict:
         c.execute("select cik, max(filed) from fundamentals where cik = any(%s::int[]) group by cik",
                   (tableau(ciks),))
         return dict(c.fetchall())
+
+
+# =============================================================================
+# Étape 4b — reconstruction des cours, divisions, dividendes, indices
+# =============================================================================
+INDICES = [("^GSPC", "S&P 500"), ("^SP500TR", "S&P 500, dividendes réinvestis")]
+
+
+def assurer_indices(cn) -> None:
+    """Crée les lignes des indices de référence si elles n'existent pas."""
+    with cn.cursor() as c:
+        for ticker, nom in INDICES:
+            c.execute("""
+                insert into companies (ticker, name, exchange, mapping_profile, history_years, in_universe)
+                values (%s, %s, 'INDEX', 'index', 10, false)
+                on conflict (ticker) do nothing
+            """, (ticker, nom))
+
+
+def lignes_indices(cn) -> list:
+    """Même forme que select_universe : les jobs de cours les traitent comme une valeur."""
+    with cn.cursor() as c:
+        c.execute("select company_id, cik, ticker, sic, mapping_profile::text, history_years "
+                  "from companies where mapping_profile::text = 'index' order by company_id")
+        return c.fetchall()
+
+
+def a_reconstruire(cn, company_ids: list) -> set:
+    """Sociétés dont l'historique n'est pas encore sur la base « ajustée des divisions »."""
+    if not company_ids:
+        return set()
+    with cn.cursor() as c:
+        c.execute("select company_id from companies where company_id = any(%s::smallint[]) "
+                  "and prices_rebuilt_at is null", (tableau(company_ids),))
+        return {r[0] for r in c.fetchall()}
+
+
+def _lot(c, nom: str, company_ids) -> None:
+    c.execute(f"create temp table if not exists {nom} (company_id smallint) on commit drop")
+    c.execute(f"truncate {nom}")
+    copier(c, nom, ["company_id"], [(i,) for i in company_ids])
+
+
+def remplacer_cours(cn, company_ids: list, mois: list) -> int:
+    """
+    Remplace TOUT l'historique de cours des sociétés données, et les date reconstruites.
+
+    Jamais de fusion ici : fusionner une série ajustée des seules divisions dans un
+    historique ajusté des dividendes fabriquerait une série hybride, avec une marche à
+    chaque frontière — le défaut déjà vu à l'étape 4a. Une société dont la série
+    téléchargée est vide n'est pas touchée : on ne remplace pas un historique par rien.
+    """
+    ids = sorted({m[0] for m in mois} & set(company_ids))
+    if not ids:
+        return 0
+    with cn.cursor() as c:
+        _lot(c, "_lot_cours", ids)
+        c.execute("create temp table if not exists _px_remplace "
+                  "(company_id smallint, ym date, d smallint[], c real[], v real[]) on commit drop")
+        c.execute("truncate _px_remplace")
+        copier(c, "_px_remplace", ["company_id", "ym", "d", "c", "v"], mois)
+        c.execute("delete from prices p using _lot_cours l where p.company_id = l.company_id")
+        c.execute("insert into prices (company_id, ym, d, c, v) "
+                  "select company_id, ym, d, c, v from _px_remplace")
+        c.execute("update companies set prices_rebuilt_at = current_date "
+                  "from _lot_cours l where companies.company_id = l.company_id")
+    return len(mois)
+
+
+def ecrire_evenements(cn, divisions: list, dividendes: list, remplaces: list) -> set:
+    """
+    Enregistre divisions et dividendes. Renvoie les sociétés dont une division était
+    INCONNUE jusqu'ici, hors sociétés reconstruites dans ce même lot.
+
+    Une nouvelle division réajuste rétroactivement tout l'historique chez Yahoo : la
+    fusionner avec l'historique stocké produirait une falaise. L'appelant ne doit donc
+    pas écrire les cours de ces sociétés, qui sont marquées à reconstruire.
+
+    `divisions` : (company_id, date, ratio) ; `dividendes` : (company_id, date, montant)
+    `remplaces` : sociétés reconstruites, dont les événements sont remplacés en entier.
+    """
+    with cn.cursor() as c:
+        c.execute("create temp table if not exists _evt_div (company_id smallint, date date, ratio real) on commit drop")
+        c.execute("create temp table if not exists _evt_dvd (company_id smallint, date date, amount real) on commit drop")
+        c.execute("truncate _evt_div, _evt_dvd")
+        copier(c, "_evt_div", ["company_id", "date", "ratio"], divisions)
+        copier(c, "_evt_dvd", ["company_id", "date", "amount"], dividendes)
+        if remplaces:
+            _lot(c, "_lot_evt", remplaces)
+            c.execute("delete from splits s using _lot_evt l where s.company_id = l.company_id")
+            c.execute("delete from dividends d using _lot_evt l where d.company_id = l.company_id")
+        c.execute("""
+            with nouvelles as (
+                insert into splits (company_id, date, ratio)
+                select company_id, date, ratio from _evt_div
+                on conflict (company_id, date) do nothing
+                returning company_id
+            )
+            select distinct company_id from nouvelles
+        """)
+        nouvelles = {r[0] for r in c.fetchall()} - set(remplaces)
+        c.execute("""
+            insert into dividends (company_id, date, amount)
+            select company_id, date, amount from _evt_dvd
+            on conflict (company_id, date) do update set amount = excluded.amount
+              where dividends.amount is distinct from excluded.amount
+        """)
+        if nouvelles:
+            c.execute("update companies set prices_rebuilt_at = null "
+                      "where company_id = any(%s::smallint[])", (tableau(nouvelles),))
+    return nouvelles

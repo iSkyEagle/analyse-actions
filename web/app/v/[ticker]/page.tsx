@@ -63,7 +63,7 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
       <section className="mt-12" aria-labelledby="titre-cours">
         <h2 id="titre-cours" className="sr-only">Cours</h2>
-        <Graphe points={points} profondeurVisee={s.history_years} />
+        <Graphe points={points} profondeurVisee={s.history_years} reconstruit={s.prices_rebuilt_at !== null} />
       </section>
 
       {!horsPerimetre && (

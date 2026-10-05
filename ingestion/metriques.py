@@ -54,6 +54,12 @@ METRIQUES = [
     Metrique("ve_fcf", "Valeur d'entreprise sur flux de trésorerie libre", "valorisation", "multiple", (STD, REIT)),
     Metrique("rendement_dividende", "Rendement du dividende", "valorisation", "pourcentage"),
     Metrique("taux_distribution", "Taux de distribution", "valorisation", "pourcentage"),
+    # Foncières : l'amortissement de l'immobilier écrase le résultat net sans toucher à
+    # la trésorerie. Le PER de Realty Income ressortait à 41 et son taux de distribution
+    # à 224 % — deux artefacts. La mesure d'usage est le FFO : résultat net plus
+    # amortissements (approximation : les plus-values de cession n'en sont pas retirées).
+    Metrique("prix_ffo", "Prix sur FFO", "valorisation", "multiple", (REIT,),
+             note="capitalisation / (résultat net + amortissements) des 12 derniers mois"),
     Metrique("peg_historique", "PER sur croissance passée", "valorisation", "multiple",
              note="PER / croissance annuelle du résultat net sur 5 ans. Variante calculable du "
                   "PEG, qui exige des prévisions d'analystes que nous n'avons pas."),
@@ -141,7 +147,7 @@ LIBELLES_FLUX = {
     "operating_income": "résultat opérationnel", "ebitda": "EBITDA",
     "fcf": "flux libre", "ocf": "flux d'exploitation", "dividends_paid": "dividendes",
     "buybacks": "rachats", "issuance": "émissions", "sbc": "rémunération en actions",
-    "interest_expense": "charge d'intérêts",
+    "interest_expense": "charge d'intérêts", "d_and_a": "amortissements",
 }
 
 
@@ -155,7 +161,7 @@ def douze_mois(trimestres: list, exercices: list) -> tuple[dict, str]:
     premier et le dernier des quatre — environ 273 jours pour trois trimestres.
     """
     flux = ("revenue", "net_income", "operating_income", "ebitda", "fcf", "ocf",
-            "dividends_paid", "buybacks", "issuance", "sbc", "interest_expense")
+            "dividends_paid", "buybacks", "issuance", "sbc", "interest_expense", "d_and_a")
     q = sorted(trimestres, key=lambda r: r["period_end"])[-4:]
     fy = exercices[-1] if exercices else {}
     consecutifs = len(q) == 4 and 250 <= _j(q[0]["period_end"], q[3]["period_end"]) <= 300
@@ -313,6 +319,12 @@ def calculer(exercices: list, trimestres: list, cours: list, capitalisation: Opt
         rach, emis = ttm.get("buybacks"), ttm.get("issuance")
         pose("rendement_rachats_nets",
              _div((rach or 0) - (emis or 0), cap) if rach is not None or emis is not None else None)
+
+    da = ttm.get("d_and_a")
+    ffo = ni + da if ni is not None and da is not None else None
+    pose("prix_ffo", _div(cap, ffo) if cap and ffo and ffo > 0 else None,
+         "FFO négatif" if ffo is not None and ffo <= 0 else
+         ("amortissements non déclarés" if da is None else None))
 
     div = ttm.get("dividends_paid")
     pose("taux_distribution", _div(div, ni) if ni and ni > 0 and div is not None else None,
