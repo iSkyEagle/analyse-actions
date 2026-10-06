@@ -53,6 +53,16 @@ def open_provider(source: str, refresh_dump: bool):
     return provider, provider.source_stamp
 
 
+def _annuler_societe(cn) -> None:
+    """Revient au point de sauvegarde de la société en cours : elle seule est annulée."""
+    try:
+        with cn.cursor() as c:
+            c.execute("rollback to savepoint societe")
+    except Exception:
+        # Point de sauvegarde introuvable : dernier recours, la transaction entière.
+        cn.rollback()
+
+
 def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool,
         force: bool = False) -> int:
     cn = db.connect()
@@ -70,6 +80,10 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
                                   limit=limit, mappable_only=False)
     log.info("%d sociétés à traiter (source %s)", len(rows), provider.name)
 
+    # Les indices de référence n'ont ni CIK ni comptes. Sélectionnés par erreur au
+    # premier passage forcé de 4b, ils levaient un TypeError en formatant un CIK nul.
+    rows = [r for r in rows if r[1] is not None]
+
     n_rows, refreshed, ecartes, inchangees = 0, [], 0, 0
     # Dépôt le plus récent déjà ingéré, par lots de 200 CIK : une seule requête bornée
     # par lot, au lieu d'en poser une par société.
@@ -79,6 +93,13 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
             if i % 200 == 0:
                 deja = db.dernier_depot_ingere(cn, [x[1] for x in rows[i:i + 200]])
             issuer = Issuer(cik=cik, ticker=ticker, name=ticker, exchange="", sic=sic)
+            # Point de sauvegarde par société. Les écritures ne sont validées que toutes
+            # les 200 sociétés ; un `rollback` sur l'échec d'UNE société annulait toute la
+            # transaction — les écritures des sociétés précédentes, déjà comptées comme
+            # réussies, et les lignes du journal d'erreurs avec elles. Constaté au premier
+            # passage forcé de 4b : 24 échecs comptés, un seul resté visible en base.
+            with cn.cursor() as c:
+                c.execute("savepoint societe")
             try:
                 res = provider.get_fundamentals(issuer)
             except OutOfScope as e:
@@ -94,7 +115,7 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
                 r.fail_provider(e, ticker=ticker, cik=cik)
                 continue
             except Exception as e:                          # une société ne tue pas le lot
-                cn.rollback()
+                _annuler_societe(cn)
                 r.fail(ticker=ticker, cik=cik, stage="map",
                        reason=type(e).__name__, detail=str(e))
                 continue
@@ -112,10 +133,12 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
                 n_rows += db.upsert_fundamentals(cn, res.rows, force=force)
                 db.update_company_facts(cn, res, sic=sic)
             except Exception as e:
-                cn.rollback()
+                _annuler_societe(cn)
                 r.fail(ticker=ticker, cik=cik, stage="upsert",
                        reason=type(e).__name__, detail=str(e))
                 continue
+            with cn.cursor() as c:
+                c.execute("release savepoint societe")
             refreshed.append(cik)
             r.ok()
             if len(refreshed) % 200 == 0:

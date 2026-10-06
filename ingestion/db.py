@@ -162,15 +162,27 @@ class Run:
         args = (self.run_id, ticker, cik, stage, reason[:200], (detail or "")[:1000])
         sql = ("insert into ingestion_errors (run_id,ticker,cik,stage,reason,detail) "
                "values (%s,%s,%s,%s,%s,%s)")
-        for tentative in (1, 2):
+        # D'abord sous un point de sauvegarde : un échec d'écriture du journal ne doit
+        # pas annuler le travail en cours. Ensuite seulement, si la transaction est déjà
+        # avortée, le rollback global — qui purge cet état et permet d'écrire la trace.
+        try:
+            with self.cn.cursor() as c:
+                c.execute("savepoint journal")
+                c.execute(sql, args)
+                c.execute("release savepoint journal")
+            return
+        except Exception:
             try:
                 with self.cn.cursor() as c:
-                    c.execute(sql, args)
-                return
-            except Exception as e:
-                self.cn.rollback()          # purge l'état avorté puis réessaie une fois
-                if tentative == 2:
-                    log.error("journal indisponible pour %s : %s", ticker, e)
+                    c.execute("rollback to savepoint journal")
+            except Exception:
+                self.cn.rollback()
+        try:
+            with self.cn.cursor() as c:
+                c.execute(sql, args)
+        except Exception as e:
+            self.cn.rollback()
+            log.error("journal indisponible pour %s : %s", ticker, e)
 
     def fail_provider(self, exc: ProviderError, *, ticker=None, cik=None):
         self.fail(ticker=ticker, cik=cik, stage=getattr(exc, "stage", "unknown"),
