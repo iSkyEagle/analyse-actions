@@ -45,6 +45,12 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
     """
     cn = db.connect()
     aujourdhui = date.today()
+    if complet:
+        # Classification sectorielle réappliquée chaque semaine : elle suit les codes SIC
+        # mis à jour par le passage mensuel, et toute modification de secteurs.py.
+        n = db.appliquer_secteurs(cn)
+        cn.commit()
+        log.info("classification sectorielle : %d société(s) reclassée(s)", n)
     depuis = aujourdhui - (PROFONDEUR_COMPLETE if complet else PROFONDEUR_QUOTIDIENNE)
     # Indice de référence, chargé une fois pour tout le job : ^SP500TR, dividendes
     # réinvestis, pour le rendement total relatif et le bêta.

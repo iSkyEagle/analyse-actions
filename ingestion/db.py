@@ -248,10 +248,22 @@ def upsert_companies(cn, issuers, profiles: dict = None) -> dict:
             on conflict (ticker) do update
               set cik = excluded.cik, name = excluded.name,
                   exchange = excluded.exchange,
-                  mapping_profile = excluded.mapping_profile,
+                  -- Immobilier 6500-6599 : le profil déduit du seul SIC est provisoire.
+                  -- Celui fixé par le passage des comptes (foncière ou standard) est
+                  -- conservé ; sans cette exception, l'univers le réécraserait chaque mois.
+                  mapping_profile = case
+                    when companies.sic between 6500 and 6599
+                     and companies.mapping_profile::text in ('reit', 'standard')
+                     and excluded.mapping_profile::text = 'reit'
+                    then companies.mapping_profile
+                    else excluded.mapping_profile end,
                   updated_at = now()
-              where (companies.cik, companies.name, companies.exchange, companies.mapping_profile)
-                    is distinct from (excluded.cik, excluded.name, excluded.exchange, excluded.mapping_profile)
+              where (companies.cik, companies.name, companies.exchange)
+                    is distinct from (excluded.cik, excluded.name, excluded.exchange)
+                 or (companies.mapping_profile is distinct from excluded.mapping_profile
+                     and not (companies.sic between 6500 and 6599
+                              and companies.mapping_profile::text in ('reit', 'standard')
+                              and excluded.mapping_profile::text = 'reit'))
         """)
         c.execute("select ticker, company_id from companies")
         return dict(c.fetchall())
@@ -924,3 +936,36 @@ def charger_resumes(cn, company_ids: list) -> dict:
         for cid, mid, cv, p10, med, p90 in c.fetchall():
             out.setdefault(cid, {})[mid] = {"couverture": cv, "p10": p10, "mediane": med, "p90": p90}
         return out
+
+
+def appliquer_secteurs(cn) -> int:
+    """
+    Classe toutes les sociétés (secteurs.py) et écrit secteur et industrie.
+
+    Ne réécrit que ce qui change : un passage sans modification de la taxonomie ni des
+    codes SIC n'écrit rien. Les indices de référence n'ont pas de secteur.
+    Renvoie le nombre de sociétés dont la classification a changé.
+    """
+    import secteurs as S
+    with cn.cursor() as c:
+        c.execute("select company_id, cik, sic, mapping_profile::text from companies "
+                  "where mapping_profile::text <> 'index'")
+        lignes = [(cid, *S.classer(sic, cik, profil)) for cid, cik, sic, profil in c.fetchall()]
+        c.execute("create temp table if not exists _sect_stage (company_id smallint, sector text, "
+                  "industry text) on commit drop")
+        c.execute("truncate _sect_stage")
+        copier(c, "_sect_stage", ["company_id", "sector", "industry"], lignes)
+        c.execute("""
+            update companies c set sector = s.sector, industry = s.industry, updated_at = now()
+            from _sect_stage s
+            where c.company_id = s.company_id
+              and (c.sector, c.industry) is distinct from (s.sector, s.industry)
+        """)
+        return c.rowcount
+
+
+def ecrire_profil(cn, cik: int, profil: str) -> None:
+    """Profil seul, pour une société sans dépôt nouveau dont le profil a changé."""
+    with cn.cursor() as c:
+        c.execute("update companies set mapping_profile = %s::mapping_profile_t, updated_at = now() "
+                  "where cik = %s and mapping_profile::text is distinct from %s", (profil, cik, profil))

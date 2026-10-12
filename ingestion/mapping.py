@@ -294,19 +294,75 @@ def applicable(field_name: str, profile: str) -> bool:
     return profile in f.profiles and field_name not in NOT_APPLICABLE.get(profile, set())
 
 
-def profile_from_sic(sic) -> str:
-    """companies.mapping_profile, dérivé du SIC de l'endpoint `submissions`."""
+# Immeubles de placement : une société de l'immobilier n'est une foncière que si ses
+# immeubles forment l'essentiel de son actif. Mesuré en octobre 2026 : 55 à 130 % de
+# l'actif chez les foncières (Realty Income, Invitation Homes, Gladstone…), 0 % chez les
+# prestataires (CBRE, JLL, Compass, Opendoor). Plus de 100 % : les immeubles sont
+# comptés au coût d'achat, avant amortissement.
+_IMMEUBLES = ("RealEstateInvestmentPropertyAtCost", "RealEstateInvestmentPropertyNet",
+              "RealEstateInvestmentPropertyNetExcludingConstructionInProgress")
+SEUIL_FONCIERE = 0.5
+
+
+def part_immeubles(facts: dict) -> float:
+    """Immeubles de placement / actif total, au dernier 10-K. 0 si non déclarés."""
+    gaap = (facts or {}).get("facts", {}).get("us-gaap", {})
+
+    def dernier(tag):
+        u = [e for e in gaap.get(tag, {}).get("units", {}).get(USD, []) if e.get("form") == "10-K"]
+        return max(u, key=lambda e: (e["end"], e["filed"]))["val"] if u else None
+
+    actif = dernier("Assets")
+    immeubles = max((v for v in (dernier(t) for t in _IMMEUBLES) if v is not None), default=None)
+    return immeubles / actif if actif and immeubles else 0.0
+
+
+def profile_from_sic(sic, facts: dict = None) -> str:
+    """
+    companies.mapping_profile, dérivé du SIC et, pour l'immobilier, des comptes.
+
+    Révisé le 12 octobre 2026. Les tranches de codes seules classaient mal deux familles :
+    - les gestionnaires de soins (6324 : UnitedHealth, Elevance, Cigna) recevaient le
+      profil financier d'une banque, et perdaient marges, ROIC et multiples de valeur
+      d'entreprise ; les assureurs du 6321 (Aflac, Principal) restent financiers ;
+    - toute la tranche 6500-6799 recevait le profil foncière, y compris des prestataires
+      immobiliers (CBRE, JLL), des promoteurs, des détenteurs de brevets (Dolby,
+      InterDigital) et de redevances (Royal Gold, Texas Pacific Land).
+
+    Le code 6798 désigne toujours une foncière. Mais des foncières déposent aussi sous
+    6500-6599 (Invitation Homes en 6510, Gladstone en 6519) : là, ce sont les comptes qui
+    décident. Sans comptes — passage mensuel de l'univers —, le profil reste provisoire,
+    et c'est le passage des comptes qui le fixe.
+    """
     try:
         n = int(sic or 0)
     except (TypeError, ValueError):
         return STD
     if n == 6770:
         return "spac"          # blank check : hors univers, filtré en amont
+    if n == 6324:
+        return STD             # gestion des soins : une entreprise de services
     if 6000 <= n < 6500:
         return FIN
-    if 6500 <= n < 6800:
+    if n == 6798:
         return REIT
+    if 6500 <= n < 6600:
+        if facts is None:
+            return REIT        # provisoire, fixé par le passage des comptes
+        return REIT if part_immeubles(facts) >= SEUIL_FONCIERE else STD
+    if n in (6792, 6794, 6795):
+        return STD             # redevances pétrolières, brevets, redevances minières
+    if 6700 <= n < 6800:
+        return FIN             # sociétés d'investissement
     return STD
+
+
+def profil_provisoire(sic) -> bool:
+    """Le profil déduit du seul SIC doit-il attendre les comptes ?"""
+    try:
+        return 6500 <= int(sic or 0) < 6600
+    except (TypeError, ValueError):
+        return False
 
 
 # =============================================================================

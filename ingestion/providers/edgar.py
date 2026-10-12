@@ -111,7 +111,7 @@ class _EdgarBase(FundamentalsProvider):
         if profile_out:
             raise OutOfScope(profile_out, reason)
 
-        profile = M.profile_from_sic(issuer.sic)
+        profile = M.profile_from_sic(issuer.sic, facts)
         try:
             raw_rows, elog = E.extract(facts, issuer.cik, issuer.ticker, profile)
         except Exception as e:

@@ -125,6 +125,10 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
             # raccourci, pour appliquer un changement de logique d'extraction.
             connu = deja.get(cik)
             if not force and connu and res.last_filing and res.last_filing <= connu:
+                # Rien à réécrire, mais le profil peut avoir changé — règle révisée, ou
+                # profil provisoire remis par le passage mensuel de l'univers.
+                if res.mapping_profile != profile:
+                    db.ecrire_profil(cn, cik, res.mapping_profile)
                 inchangees += 1
                 refreshed.append(cik)
                 r.ok()
@@ -164,6 +168,9 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--tickers", type=str, default=None,
                    help="liste séparée par des virgules, force --source api")
+    p.add_argument("--sic", type=str, default=None,
+                   help="codes SIC ou plages, séparés par des virgules (6324,6500-6599) : "
+                        "toutes les sociétés de ces codes, univers ou non ; force --source api")
     p.add_argument("--refresh-dump", action="store_true")
     p.add_argument("--force", action="store_true",
                    help="réécrit même à date de dépôt inchangée : à utiliser après un "
@@ -174,7 +181,24 @@ def main() -> None:
     settings.setup_logging(a.verbose)
     settings.require_env()
     tickers = [t.strip().upper() for t in a.tickers.split(",")] if a.tickers else None
+    if a.sic:
+        tickers = tickers_par_sic(a.sic)
+        logging.getLogger("ingest.fundamentals").info("%d sociétés pour les codes SIC %s", len(tickers), a.sic)
     run("api" if tickers else a.source, a.limit, tickers, a.refresh_dump, a.force)
+
+
+def tickers_par_sic(spec: str) -> list:
+    """Tickers des sociétés dont le SIC tombe dans les codes ou plages donnés."""
+    bornes = []
+    for morceau in spec.split(","):
+        lo, _, hi = morceau.strip().partition("-")
+        bornes.append((int(lo), int(hi or lo)))
+    cn = db.connect()
+    with cn.cursor() as c:
+        c.execute("select ticker, sic from companies where cik is not null and sic is not null")
+        out = [tk for tk, sic in c.fetchall() if any(lo <= sic <= hi for lo, hi in bornes)]
+    cn.close()
+    return out
 
 
 if __name__ == "__main__":
