@@ -105,7 +105,11 @@ export default function Graphe({
       localization: { locale: "fr-FR" },
       grid: { vertLines: { visible: false }, horzLines: { color: bande } },
       rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false },
+      // Espacement minimal entre séances, abaissé de 0,5 px (valeur par défaut) à 0,05 px.
+      // Dix ans font environ 2 500 séances : au minimum par défaut, il fallait 1 250 px.
+      // Sur une largeur de 800 px, la bibliothèque ramenait en silence la plage « 10 ans »
+      // à un peu plus de cinq ans — invisible tant qu'aucune valeur n'avait dix ans.
+      timeScale: { borderVisible: false, minBarSpacing: 0.05 },
     });
 
     const prix = chart.addSeries(AreaSeries, {
