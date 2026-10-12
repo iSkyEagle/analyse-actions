@@ -113,6 +113,20 @@ export async function series(companyId: number): Promise<PointSerie[]> {
   );
 }
 
+export type ResumeHistorique = {
+  metric_id: string; couverture: number; p10: number | null; mediane: number | null;
+  p90: number | null; mini: number | null; maxi: number | null; as_of: string;
+};
+
+/** Résumés sur 5 ans des multiples point-in-time, pour la règle historique (étape 4c). */
+export async function historiques(companyId: number): Promise<ResumeHistorique[]> {
+  return query<ResumeHistorique>(
+    `select metric_id, couverture, p10, mediane, p90, mini, maxi, as_of
+     from metric_history where company_id = $1`,
+    [companyId],
+  );
+}
+
 /** Point de cours : [date 'AAAA-MM-JJ', clôture ajustée, volume en titres]. */
 export type PointCours = [string, number, number];
 

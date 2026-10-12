@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from statistics import pstdev
 from typing import Optional
 
@@ -53,7 +53,14 @@ METRIQUES = [
     Metrique("ve_ebitda", "Valeur d'entreprise sur EBITDA", "valorisation", "multiple", (STD, REIT)),
     Metrique("ve_fcf", "Valeur d'entreprise sur flux de trésorerie libre", "valorisation", "multiple", (STD, REIT)),
     Metrique("rendement_dividende", "Rendement du dividende", "valorisation", "pourcentage"),
-    Metrique("taux_distribution", "Taux de distribution", "valorisation", "pourcentage"),
+    # Hors foncières : leur résultat net est écrasé par l'amortissement des immeubles, et
+    # le taux ressortait au-dessus de 100 % pour presque toutes — 230 % chez Realty Income.
+    Metrique("taux_distribution", "Taux de distribution", "valorisation", "pourcentage", (STD, FIN)),
+    # Foncières : la convention du secteur. Une métrique distincte plutôt qu'une
+    # définition qui changerait selon le profil : un libellé, une formule.
+    Metrique("taux_distribution_ffo", "Taux de distribution sur FFO", "valorisation", "pourcentage", (REIT,),
+             note="dividendes / (résultat net + amortissements) des 12 derniers mois — au-delà de 100 %, "
+                  "le dividende n'est plus couvert par le cash généré"),
     # Foncières : l'amortissement de l'immobilier écrase le résultat net sans toucher à
     # la trésorerie. Le PER de Realty Income ressortait à 41 et son taux de distribution
     # à 224 % — deux artefacts. La mesure d'usage est le FFO : résultat net plus
@@ -79,8 +86,21 @@ METRIQUES = [
     Metrique("cagr_ca_5a", "Chiffre d'affaires, 5 ans", "croissance", "pourcentage"),
     Metrique("cagr_rn_3a", "Résultat net, 3 ans", "croissance", "pourcentage"),
     Metrique("cagr_rn_5a", "Résultat net, 5 ans", "croissance", "pourcentage"),
+    # BPA sur base actuelle : résultat net / actions ramenées sur la base des cours.
+    # Le BPA publié change d'unité à chaque division ; sa croissance brute n'a pas de sens.
+    Metrique("cagr_bpa_3a", "Bénéfice par action, 3 ans", "croissance", "pourcentage"),
+    Metrique("cagr_bpa_5a", "Bénéfice par action, 5 ans", "croissance", "pourcentage"),
     Metrique("cagr_fcf_5a", "Flux de trésorerie libre, 5 ans", "croissance", "pourcentage", (STD, REIT)),
     Metrique("croissance_trimestre", "Dernier trimestre sur un an", "croissance", "pourcentage"),
+    # Rendement total : cours ajusté des divisions et dividendes réinvestis, face à
+    # ^SP500TR, l'indice dividendes réinvestis. Un cours nu face à un indice qui
+    # incorpore ses dividendes désavantagerait toute valeur de rendement.
+    Metrique("rendement_total_1a", "Rendement total, 1 an", "croissance", "pourcentage"),
+    Metrique("ecart_sp500_1a", "Écart au S&P 500, 1 an", "croissance", "points"),
+    Metrique("rendement_total_3a", "Rendement total annuel, 3 ans", "croissance", "pourcentage"),
+    Metrique("ecart_sp500_3a", "Écart au S&P 500, 3 ans", "croissance", "points"),
+    Metrique("rendement_total_5a", "Rendement total annuel, 5 ans", "croissance", "pourcentage"),
+    Metrique("ecart_sp500_5a", "Écart au S&P 500, 5 ans", "croissance", "points"),
 
     # --- Dilution -----------------------------------------------------------------
     Metrique("cagr_actions_1a", "Nombre d'actions, 1 an", "dilution", "pourcentage"),
@@ -97,6 +117,8 @@ METRIQUES = [
     Metrique("volatilite_1a", "Volatilité annualisée, 1 an", "risque", "pourcentage"),
     Metrique("drawdown_max_5a", "Pire baisse depuis un sommet, 5 ans", "risque", "pourcentage"),
     Metrique("distance_plus_haut_52s", "Écart au plus haut sur 52 semaines", "risque", "pourcentage"),
+    Metrique("beta_5a", "Bêta, 5 ans", "risque", "multiple",
+             note="rendements mensuels sur 5 ans face au S&P 500, dividendes réinvestis — la convention de Yahoo"),
 ]
 PAR_ID = {m.id: m for m in METRIQUES}
 
@@ -105,7 +127,8 @@ PAR_ID = {m.id: m for m in METRIQUES}
 # reporte leur dernière valeur connue. Relire cinq ans pour tout l'univers chaque soir
 # coûtait environ 60 Mo de lecture sur une instance nano, pour une valeur qui bouge
 # à peine d'un jour sur l'autre.
-HISTORIQUE_LONG = ("drawdown_max_5a",)
+HISTORIQUE_LONG = ("drawdown_max_5a", "rendement_total_3a", "ecart_sp500_3a",
+                   "rendement_total_5a", "ecart_sp500_5a", "beta_5a")
 
 
 # =============================================================================
@@ -270,7 +293,8 @@ def ratios_exercice(r: dict, profil: str) -> dict:
 # CALCUL COMPLET
 # =============================================================================
 def calculer(exercices: list, trimestres: list, cours: list, capitalisation: Optional[float],
-             profil: str) -> dict:
+             profil: str, divisions: Optional[list] = None,
+             dividendes: Optional[list] = None, indice: Optional[list] = None) -> dict:
     """
     Renvoie {metric_id: (valeur | None, raison | None)}.
 
@@ -327,6 +351,9 @@ def calculer(exercices: list, trimestres: list, cours: list, capitalisation: Opt
          ("amortissements non déclarés" if da is None else None))
 
     div = ttm.get("dividends_paid")
+    pose("taux_distribution_ffo", _div(div, ffo) if ffo and ffo > 0 and div is not None else None,
+         "FFO négatif" if ffo is not None and ffo <= 0 else
+         ("amortissements non déclarés" if da is None else None))
     pose("taux_distribution", _div(div, ni) if ni and ni > 0 and div is not None else None,
          "résultat négatif sur 12 mois" if ni is not None and ni <= 0 else None)
 
@@ -362,28 +389,47 @@ def calculer(exercices: list, trimestres: list, cours: list, capitalisation: Opt
         pose("croissance_trimestre", None, "aucun trimestre déposé")
 
     # --- dilution -----------------------------------------------------------------
-    # Étape 4a : les nombres d'actions EDGAR ne sont pas encore ramenés sur une base
-    # commune après une division. Un rapport annuel supérieur à 1,8 ou inférieur à 0,55
-    # est donc suspendu : division, regroupement, introduction en bourse ou émission
-    # massive — impossible à distinguer sans l'historique des divisions (étape 4b).
+    # Nombres d'actions ramenés sur la base actuelle par les divisions connues (4c). La
+    # suspension au-delà de x1,8 n'est conservée QUE sans historique des divisions : une
+    # variation qui subsiste après correction est un vrai événement sur le capital —
+    # introduction, fusion, émission massive —, que la règle 4 du moteur d'analyse
+    # signalera, et qui doit apparaître dans le chiffre.
+    def actions_de(r):
+        return actions_base_actuelle(r, divisions) if divisions is not None else r.get("shares_diluted")
+
     for n in (1, 3, 5):
         debut, annees = _il_y_a(fy, n, tolerance=0.3 if n > 1 else 0.2)
         if debut is None:
             pose(f"cagr_actions_{n}a", None, f"moins de {n} exercice{'s' if n > 1 else ''} disponible{'s' if n > 1 else ''}")
             continue
         fenetre = [r for r in fy if r["period_end"] >= debut["period_end"]]
-        actions = [r.get("shares_diluted") for r in fenetre]
-        if any(a is None or a <= 0 for a in actions):
+        actions = [actions_de(r) for r in fenetre]
+        if any(x is None or x <= 0 for x in actions):
             pose(f"cagr_actions_{n}a", None, "nombre d'actions manquant sur la période")
             continue
-        sauts = [b / a for a, b in zip(actions, actions[1:])]
-        if any(s > 1.8 or s < 0.55 for s in sauts):
-            pose(f"cagr_actions_{n}a", None,
-                 "variation brutale du nombre d'actions : division, regroupement, introduction "
-                 "ou émission massive, à confirmer avec l'historique des divisions")
-            continue
+        if divisions is None:
+            sauts = [y / x for x, y in zip(actions, actions[1:])]
+            if any(s > 1.8 or s < 0.55 for s in sauts):
+                pose(f"cagr_actions_{n}a", None,
+                     "variation brutale du nombre d'actions : division, regroupement, introduction "
+                     "ou émission massive, à confirmer avec l'historique des divisions")
+                continue
         v, raison = _cagr(actions[0], actions[-1], annees)
         pose(f"cagr_actions_{n}a", v, raison)
+
+    # --- BPA sur base actuelle --------------------------------------------------------
+    for n in (3, 5):
+        debut, annees = _il_y_a(fy, n)
+        if debut is None:
+            pose(f"cagr_bpa_{n}a", None, f"moins de {n} exercices disponibles")
+            continue
+        a0, a1 = actions_de(debut), actions_de(fy[-1])
+        r0, r1 = debut.get("net_income"), fy[-1].get("net_income")
+        if not a0 or not a1 or r0 is None or r1 is None:
+            pose(f"cagr_bpa_{n}a", None, "résultat net ou nombre d'actions manquant")
+            continue
+        v, raison = _cagr(r0 / a0, r1 / a1, annees)
+        pose(f"cagr_bpa_{n}a", v, raison)
 
     fcf = ttm.get("fcf")
     tres = bilan.get("cash")
@@ -416,6 +462,21 @@ def calculer(exercices: list, trimestres: list, cours: list, capitalisation: Opt
         for mid in ("volatilite_1a", "distance_plus_haut_52s", "drawdown_max_5a"):
             pose(mid, None, "moins d'un an de cours")
 
+    # --- rendement total, écart au S&P 500, bêta -----------------------------------
+    if indice:
+        rt_soc = serie_rendement_total(cours, dividendes or [])
+        for n in (1, 3, 5):
+            r_soc = performance_annualisee(rt_soc, n)
+            r_ind = performance_annualisee(indice, n)
+            raison = f"moins de {n} an{'s' if n > 1 else ''} de cours"
+            pose(f"rendement_total_{n}a", r_soc, raison)
+            pose(f"ecart_sp500_{n}a", r_soc - r_ind if r_soc is not None and r_ind is not None else None, raison)
+        pose("beta_5a", beta_mensuel(rt_soc, indice), "moins de 36 mois de cours")
+    else:
+        for mid in ("rendement_total_1a", "ecart_sp500_1a", "rendement_total_3a", "ecart_sp500_3a",
+                    "rendement_total_5a", "ecart_sp500_5a", "beta_5a"):
+            pose(mid, None, "indice de référence indisponible")
+
     res["_base_12_mois"] = (None, source_ttm)
     return res
 
@@ -430,6 +491,192 @@ def serie_annuelle(exercices: list, profil: str, n: int = 6) -> dict:
                 out.setdefault(mid, []).append((r["period_end"], v))
     return out
 
+
+# =============================================================================
+# ÉTAPE 4c — MULTIPLES POINT-IN-TIME
+#
+# Pour chaque séance, les multiples sont calculés avec les SEULS comptes publiés à
+# cette date : une ligne n'est connue qu'à partir de sa première publication
+# (`first_filed`). Les nombres d'actions sont ramenés sur la base actuelle, celle des
+# cours ajustés des divisions. La série n'est jamais stockée : seul son résumé l'est.
+# =============================================================================
+MULTIPLES_HISTORIQUES = ("per", "prix_ventes", "prix_valeur_comptable", "ve_ebitda",
+                         "ve_fcf", "prix_ffo", "rendement_dividende")
+
+
+def facteur_division(depuis: str, divisions: list) -> float:
+    """
+    Produit des ratios des divisions postérieures à `depuis`.
+
+    Un nombre d'actions publié avant une division est en unités d'avant : NVIDIA
+    déclarait 2 535 M d'actions pour 2022 dans un dépôt de février 2024, avant sa
+    division par dix de juin 2024. Les cours, eux, sont ajustés de toutes les
+    divisions jusqu'à aujourd'hui : il faut ramener les actions sur la même base.
+    """
+    f = 1.0
+    for d, ratio in divisions:
+        if d > depuis:
+            f *= ratio
+    return f
+
+
+def actions_base_actuelle(ligne: dict, divisions: list) -> Optional[float]:
+    s = ligne.get("shares_diluted")
+    if s is None or s <= 0:
+        return None
+    source = ligne.get("shares_filed") or ligne.get("filed")
+    return s * facteur_division(source, divisions) if source else s
+
+
+def _etats_connus(trimestres: list, exercices: list, divisions: list) -> list:
+    """
+    [(date, état)] croissant : l'état des comptes tel qu'un lecteur pouvait le
+    connaître à cette date — flux sur douze mois, dernier bilan, nombre d'actions.
+    Une entrée par date de publication ; entre deux, l'état ne change pas.
+    """
+    cle = lambda r: r["period_end"]
+    q_tous = sorted((r for r in trimestres if r.get("first_filed")), key=cle)
+    fy_tous = sorted((r for r in exercices if r.get("first_filed")), key=cle)
+    etats = []
+    for d in sorted({r["first_filed"] for r in q_tous + fy_tous}):
+        q = [r for r in q_tous if r["first_filed"] <= d]
+        fy = [r for r in fy_tous if r["first_filed"] <= d]
+        ttm, _ = douze_mois(q, fy)
+        avec_actions = [r for r in q + fy if r.get("shares_diluted")]
+        actions = (actions_base_actuelle(max(avec_actions, key=cle), divisions)
+                   if avec_actions else None)
+        etats.append((d, {"ttm": ttm, "bilan": _dernier_bilan(q, fy), "actions": actions}))
+    return etats
+
+
+def _multiples_du_jour(cours: float, etat: dict, profil: str) -> dict:
+    """Mêmes formules que la valeur du jour de calculer(), sur un état passé."""
+    actions = etat["actions"]
+    if not actions or not cours:
+        return {}
+    cap = cours * actions
+    t, b = etat["ttm"], etat["bilan"]
+    ni, rev, eb, fcf = t.get("net_income"), t.get("revenue"), t.get("ebitda"), t.get("fcf")
+    eq, debt, cash = b.get("equity"), b.get("total_debt"), b.get("cash")
+    ve = cap + debt - cash if debt is not None and cash is not None else None
+    da = t.get("d_and_a")
+    ffo = ni + da if ni is not None and da is not None else None
+    v = {
+        "per": cap / ni if ni and ni > 0 else None,
+        "prix_ventes": cap / rev if rev and rev > 0 else None,
+        "prix_valeur_comptable": cap / eq if eq and eq > 0 else None,
+        "ve_ebitda": ve / eb if ve and eb and eb > 0 else None,
+        "ve_fcf": ve / fcf if ve and fcf and fcf > 0 else None,
+        "prix_ffo": cap / ffo if ffo and ffo > 0 else None,
+        "rendement_dividende": (t.get("dividends_paid") / cap
+                                if t.get("dividends_paid") is not None else None),
+    }
+    return {k: x for k, x in v.items() if profil in PAR_ID[k].profils}
+
+
+def multiples_historiques(trimestres: list, exercices: list, jours: list,
+                          divisions: list, profil: str) -> dict:
+    """
+    {multiple: [valeur | None par séance]}, alignées sur `jours` [(date, clôture)].
+    None : non applicable ce jour-là (résultat négatif…) ou comptes pas encore publiés.
+    """
+    etats = _etats_connus(trimestres, exercices, divisions)
+    series = {m: [] for m in MULTIPLES_HISTORIQUES if profil in PAR_ID[m].profils}
+    i = -1
+    for d, cours in jours:
+        while i + 1 < len(etats) and etats[i + 1][0] <= d:
+            i += 1
+        v = _multiples_du_jour(cours, etats[i][1], profil) if i >= 0 else {}
+        for m in series:
+            series[m].append(v.get(m))
+    return series
+
+
+def resume_historique(serie: list, actuelle: Optional[float]) -> Optional[dict]:
+    """
+    Résumé d'une série sur 5 ans : étendue, 10e et 90e centiles, médiane, et rang de la
+    valeur du jour dans cette distribution. `couverture` : part des séances où le
+    multiple était défini. Sous 50 %, la règle historique n'est pas affichée — une
+    médiane calculée sur une minorité de séances ne représente pas la société.
+    """
+    valides = sorted(v for v in serie if v is not None and math.isfinite(v))
+    if not serie:
+        return None
+    res = {"n": len(valides), "couverture": len(valides) / len(serie)}
+    if len(valides) < 60:
+        return res
+    q = lambda p: valides[round(p * (len(valides) - 1))]
+    res.update(p10=q(0.10), mediane=q(0.50), p90=q(0.90), mini=valides[0], maxi=valides[-1])
+    if actuelle is not None:
+        from bisect import bisect_left
+        res["rang"] = bisect_left(valides, actuelle) / len(valides)
+    return res
+
+
+# =============================================================================
+# ÉTAPE 4c — RENDEMENT TOTAL ET BÊTA
+# =============================================================================
+def serie_rendement_total(jours: list, dividendes: list) -> list:
+    """
+    [(date, valeur)] : un dollar investi à la première séance, dividendes réinvestis.
+
+    Le jour du détachement, la clôture a déjà baissé du montant du dividende : le
+    rajouter à cette clôture donne le rendement total de la séance. Les montants de
+    yfinance sont ajustés des divisions, comme les cours.
+    """
+    div = {}
+    for d, x in dividendes:
+        div[d] = div.get(d, 0.0) + x
+    out, valeur, prec = [], 1.0, None
+    for d, c in jours:
+        if prec:
+            valeur *= (c + div.get(d, 0.0)) / prec
+        out.append((d, valeur))
+        prec = c
+    return out
+
+
+def performance_annualisee(serie: list, annees: int) -> Optional[float]:
+    """Rendement annualisé sur les N dernières années ; None si l'historique est trop court."""
+    if not serie:
+        return None
+    fin = date.fromisoformat(serie[-1][0])
+    cible = date(fin.year - annees, fin.month, min(fin.day, 28)).isoformat()
+    # Une semaine de tolérance : la séance de départ peut tomber un jour férié.
+    if serie[0][0] > (date.fromisoformat(cible) + timedelta(days=7)).isoformat():
+        return None
+    depart = next((v for d, v in reversed(serie) if d <= cible), serie[0][1])
+    if depart <= 0:
+        return None
+    return (serie[-1][1] / depart) ** (1 / annees) - 1
+
+
+def _fins_de_mois(serie: list) -> dict:
+    """{'AAAA-MM': dernière valeur du mois}."""
+    out = {}
+    for d, v in serie:
+        out[d[:7]] = v
+    return out
+
+
+def beta_mensuel(serie: list, indice: list, mois: int = 60, minimum: int = 36) -> Optional[float]:
+    """
+    Bêta : covariance des rendements mensuels de la valeur et de l'indice, rapportée à
+    la variance de l'indice. Le mois en cours, incomplet, est exclu.
+    """
+    a, b = _fins_de_mois(serie), _fins_de_mois(indice)
+    communs = sorted(set(a) & set(b))
+    if communs and communs[-1] == date.today().isoformat()[:7]:
+        communs = communs[:-1]
+    communs = communs[-(mois + 1):]
+    rs = [a[y] / a[x] - 1 for x, y in zip(communs, communs[1:]) if a[x] > 0]
+    ri = [b[y] / b[x] - 1 for x, y in zip(communs, communs[1:]) if b[x] > 0]
+    if len(rs) < minimum or len(rs) != len(ri):
+        return None
+    ms, mi = sum(rs) / len(rs), sum(ri) / len(ri)
+    cov = sum((x - ms) * (y - mi) for x, y in zip(rs, ri))
+    var = sum((y - mi) ** 2 for y in ri)
+    return cov / var if var > 0 else None
 
 # =============================================================================
 # EXPORT pour l'interface — python metriques.py > ../web/lib/metriques.json

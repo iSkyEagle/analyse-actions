@@ -86,6 +86,15 @@
    "note": ""
   },
   {
+   "id": "taux_distribution_ffo",
+   "libelle": "Taux de distribution sur FFO",
+   "axe": "valorisation",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": "dividendes / (résultat net + amortissements) des 12 derniers mois — au-delà de 100 %, le dividende n'est plus couvert par le cash généré"
+  },
+  {
    "id": "prix_ffo",
    "libelle": "Prix sur FFO",
    "axe": "valorisation",
@@ -212,6 +221,24 @@
    "note": ""
   },
   {
+   "id": "cagr_bpa_3a",
+   "libelle": "Bénéfice par action, 3 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "cagr_bpa_5a",
+   "libelle": "Bénéfice par action, 5 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
    "id": "cagr_fcf_5a",
    "libelle": "Flux de trésorerie libre, 5 ans",
    "axe": "croissance",
@@ -225,6 +252,60 @@
    "libelle": "Dernier trimestre sur un an",
    "axe": "croissance",
    "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "rendement_total_1a",
+   "libelle": "Rendement total, 1 an",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "ecart_sp500_1a",
+   "libelle": "Écart au S&P 500, 1 an",
+   "axe": "croissance",
+   "format": "points",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "rendement_total_3a",
+   "libelle": "Rendement total annuel, 3 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "ecart_sp500_3a",
+   "libelle": "Écart au S&P 500, 3 ans",
+   "axe": "croissance",
+   "format": "points",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "rendement_total_5a",
+   "libelle": "Rendement total annuel, 5 ans",
+   "axe": "croissance",
+   "format": "pourcentage",
+   "serie": false,
+   "perte": false,
+   "note": ""
+  },
+  {
+   "id": "ecart_sp500_5a",
+   "libelle": "Écart au S&P 500, 5 ans",
+   "axe": "croissance",
+   "format": "points",
    "serie": false,
    "perte": false,
    "note": ""
@@ -309,6 +390,15 @@
    "serie": false,
    "perte": false,
    "note": ""
+  },
+  {
+   "id": "beta_5a",
+   "libelle": "Bêta, 5 ans",
+   "axe": "risque",
+   "format": "multiple",
+   "serie": false,
+   "perte": false,
+   "note": "rendements mensuels sur 5 ans face au S&P 500, dividendes réinvestis — la convention de Yahoo"
   }
  ]
 }

@@ -61,6 +61,14 @@ export function metrique(v: number, format: string): string {
     const d = Math.abs(v) >= 10 ? 0 : 1;
     return new Intl.NumberFormat("fr-FR", { style: "percent", minimumFractionDigits: d, maximumFractionDigits: d }).format(v);
   }
+  if (format === "points") {
+    // Écart de rendement annuel, en points de pourcentage, toujours signé :
+    // « +3,1 pts » se lit comme une comparaison, « 3,1 % » comme un rendement.
+    const p = v * 100;
+    const t = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1,
+                                               signDisplay: "always" }).format(p);
+    return `${t} pt${Math.abs(p) >= 2 ? "s" : ""}`;
+  }
   if (format === "trimestres") {
     return `${nfx(1).format(v)} trimestre${Math.abs(v) >= 2 ? "s" : ""}`;
   }

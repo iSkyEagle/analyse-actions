@@ -110,7 +110,12 @@ INCOME = [
     ),
     Field(
         "shares_diluted", SHARES, FLOW,
+        # Balise combinée : une société en perte, dont le nombre dilué égale le nombre de
+        # base, le déclare souvent sous une balise unique. Absente de la chaîne, elle
+        # privait de nombre d'actions précisément les sociétés déficitaires, celles où
+        # la dilution compte le plus — Caribou en 2019 et 2020.
         tags=("WeightedAverageNumberOfDilutedSharesOutstanding",
+              "WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
               "WeightedAverageNumberOfSharesOutstandingBasic"),
         note="pivot de l'axe Dilution : 44/44, la métrique différenciante est la mieux couverte",
     ),
@@ -136,6 +141,7 @@ INCOME = [
     Field(
         "shares_basic", SHARES, FLOW,
         tags=("WeightedAverageNumberOfSharesOutstandingBasic",
+              "WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
               "WeightedAverageNumberOfDilutedSharesOutstanding"),
         note="l'ecart basic/dilue est une mesure directe de l'overhang"),
     Field(

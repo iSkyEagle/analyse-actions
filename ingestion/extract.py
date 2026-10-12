@@ -84,6 +84,13 @@ def index_facts(companyfacts: dict):
                 kind = _duration_kind(e.get("start"), e["end"])
                 if kind is None:
                     continue
+                # Un exercice ne se lit que dans un rapport annuel. Une durée d'un an
+                # dans un 10-Q est une donnée glissante sur douze mois — Amazon y publie
+                # ainsi son flux de trésorerie libre chaque trimestre. Classée d'après sa
+                # seule durée, elle devenait un exercice fantôme : quatre « 2025 » chez
+                # Amazon, qui faussaient toutes ses mesures annuelles.
+                if kind == "FY" and e.get("form") in ("10-Q", "10-Q/A"):
+                    continue
                 key = (kind, e["end"], e.get("start"))
                 pk = (kind, e["end"])
                 if pk not in premieres or e["filed"] < premieres[pk]:

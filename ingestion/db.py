@@ -386,6 +386,20 @@ def upsert_fundamentals(cn, rows: Iterable, force: bool = False) -> int:
         c.execute("truncate _fund_stage")
         copier(c, "_fund_stage", _COLS_ECRITES, payload)
         c.execute(sql)
+        if force:
+            # Mode forcé : l'extraction d'une société est la vérité complète sur ses
+            # comptes. Les périodes qu'elle ne produit plus sont supprimées — les 55
+            # exercices fantômes d'Amazon, tirés de données glissantes sur douze mois,
+            # resteraient sinon en base après correction de l'extraction. Jamais hors
+            # mode forcé, et jamais sur une extraction vide (retour anticipé plus haut).
+            c.execute("""
+                delete from fundamentals f
+                using (select distinct cik from _fund_stage) s
+                where f.cik = s.cik
+                  and not exists (select 1 from _fund_stage t
+                                  where t.cik = f.cik and t.period_end = f.period_end
+                                    and t.fiscal_period = f.fiscal_period)
+            """)
     return len(payload)
 
 
@@ -607,14 +621,16 @@ def charger_fondamentaux(cn, ciks: list) -> dict:
     """
     if not ciks:
         return {}
-    cols = ["cik", "period_end", "fiscal_period"] + FUND_COLS
+    cols = ["cik", "period_end", "fiscal_period"] + FUND_COLS + ["filed", "first_filed", "shares_filed"]
     with cn.cursor() as c:
         c.execute(f"select {', '.join(cols)} from fundamentals where cik = any(%s::int[]) "
                   f"order by cik, period_end", (tableau(ciks),))
         out: dict = {}
         for ligne in c.fetchall():
             r = dict(zip(cols, ligne))
-            r["period_end"] = r["period_end"].isoformat()
+            for k in ("period_end", "filed", "first_filed", "shares_filed"):
+                if r[k] is not None:
+                    r[k] = r[k].isoformat()
             out.setdefault(r["cik"], []).append(r)
         return out
 
@@ -822,3 +838,76 @@ def ecrire_evenements(cn, divisions: list, dividendes: list, remplaces: list) ->
             c.execute("update companies set prices_rebuilt_at = null "
                       "where company_id = any(%s::smallint[])", (tableau(nouvelles),))
     return nouvelles
+
+
+# =============================================================================
+# Étape 4c — divisions, dividendes, indice, résumés historiques
+# =============================================================================
+def charger_divisions(cn, company_ids: list) -> dict:
+    """{company_id: [('AAAA-MM-JJ', ratio)]} — tout l'historique : un dépôt ancien peut
+    précéder une division vieille de dix ans."""
+    if not company_ids:
+        return {}
+    with cn.cursor() as c:
+        c.execute("select company_id, date, ratio from splits where company_id = any(%s::smallint[]) "
+                  "order by 1, 2", (tableau(company_ids),))
+        out: dict = {}
+        for cid, d, r in c.fetchall():
+            out.setdefault(cid, []).append((d.isoformat(), float(r)))
+        return out
+
+
+def charger_dividendes(cn, company_ids: list, depuis: date) -> dict:
+    """{company_id: [('AAAA-MM-JJ', montant)]} sur la fenêtre de cours."""
+    if not company_ids:
+        return {}
+    with cn.cursor() as c:
+        c.execute("select company_id, date, amount from dividends where company_id = any(%s::smallint[]) "
+                  "and date >= %s order by 1, 2", (tableau(company_ids), depuis))
+        out: dict = {}
+        for cid, d, x in c.fetchall():
+            out.setdefault(cid, []).append((d.isoformat(), float(x)))
+        return out
+
+
+def id_indice(cn, ticker: str = "^SP500TR"):
+    with cn.cursor() as c:
+        c.execute("select company_id from companies where ticker = %s", (ticker,))
+        r = c.fetchone()
+        return r[0] if r else None
+
+
+def ecrire_resumes(cn, company_ids: list, lignes: list) -> None:
+    """
+    Remplace les résumés historiques d'un lot, en différentiel.
+    `lignes` : (company_id, metric_id, as_of, n, couverture, p10, mediane, p90, mini, maxi)
+    """
+    if not company_ids:
+        return
+    cols = ["company_id", "metric_id", "as_of", "n", "couverture", "p10", "mediane", "p90", "mini", "maxi"]
+    with cn.cursor() as c:
+        _lot(c, "_lot_hist", company_ids)
+        c.execute("create temp table if not exists _hist_stage (company_id smallint, metric_id text, "
+                  "as_of date, n int, couverture real, p10 float8, mediane float8, p90 float8, "
+                  "mini float8, maxi float8) on commit drop")
+        c.execute("truncate _hist_stage")
+        copier(c, "_hist_stage", cols, [tuple(_clean(v) if isinstance(v, float) else v for v in l)
+                                        for l in lignes])
+        c.execute(f"""
+            insert into metric_history ({', '.join(cols)})
+            select {', '.join(cols)} from _hist_stage
+            on conflict (company_id, metric_id) do update set
+              as_of = excluded.as_of, n = excluded.n, couverture = excluded.couverture,
+              p10 = excluded.p10, mediane = excluded.mediane, p90 = excluded.p90,
+              mini = excluded.mini, maxi = excluded.maxi
+              where (metric_history.n, metric_history.p10, metric_history.mediane, metric_history.p90,
+                     metric_history.mini, metric_history.maxi)
+                    is distinct from (excluded.n, excluded.p10, excluded.mediane, excluded.p90,
+                                      excluded.mini, excluded.maxi)
+        """)
+        c.execute("""
+            delete from metric_history h using _lot_hist l
+            where h.company_id = l.company_id
+              and not exists (select 1 from _hist_stage s
+                              where s.company_id = h.company_id and s.metric_id = h.metric_id)
+        """)

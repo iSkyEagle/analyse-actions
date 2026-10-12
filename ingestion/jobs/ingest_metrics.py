@@ -46,6 +46,12 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
     cn = db.connect()
     aujourdhui = date.today()
     depuis = aujourdhui - (PROFONDEUR_COMPLETE if complet else PROFONDEUR_QUOTIDIENNE)
+    # Indice de référence, chargé une fois pour tout le job : ^SP500TR, dividendes
+    # réinvestis, pour le rendement total relatif et le bêta.
+    idx = db.id_indice(cn)
+    indice = db.charger_cours(cn, [idx], depuis).get(idx, []) if idx else []
+    if not indice:
+        log.warning("indice ^SP500TR sans cours : rendements relatifs et bêta non calculés")
 
     if tickers:
         with cn.cursor() as c:
@@ -65,6 +71,8 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
             try:
                 comptes = db.charger_fondamentaux(cn, [s[1] for s in lot])
                 cours = db.charger_cours(cn, ids, depuis)
+                divisions = db.charger_divisions(cn, ids)
+                dividendes = db.charger_dividendes(cn, ids, depuis)
                 with cn.cursor() as c:
                     c.execute("select company_id, market_cap from companies where company_id = any(%s)", (ids,))
                     capis = dict(c.fetchall())
@@ -81,15 +89,27 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
                     r.fail(ticker=s[2], cik=s[1], stage="lecture", reason=type(e).__name__, detail=str(e))
                 continue
 
-            lignes, series, calculees = [], [], []
+            lignes, series, resumes, calculees = [], [], [], []
             for company_id, cik, ticker, sic, profil, _ in lot:
                 lignes_cik = comptes.get(cik, [])
                 exercices = [x for x in lignes_cik if x["fiscal_period"] == "FY"]
                 trimestres = [x for x in lignes_cik if x["fiscal_period"] == "Q"]
                 try:
-                    res = MQ.calculer(exercices, trimestres, cours.get(company_id, []),
-                                      capis.get(company_id), profil)
+                    jours = cours.get(company_id, [])
+                    res = MQ.calculer(exercices, trimestres, jours, capis.get(company_id), profil,
+                                      divisions=divisions.get(company_id, []),
+                                      dividendes=dividendes.get(company_id, []),
+                                      indice=indice or None)
                     ser = MQ.serie_annuelle(exercices, profil)
+                    if complet:
+                        hist = MQ.multiples_historiques(trimestres, exercices, jours,
+                                                        divisions.get(company_id, []), profil)
+                        for mid, valeurs in hist.items():
+                            r_ = MQ.resume_historique(valeurs, None)
+                            if r_:
+                                resumes.append((company_id, mid, aujourdhui, r_["n"], r_["couverture"],
+                                                r_.get("p10"), r_.get("mediane"), r_.get("p90"),
+                                                r_.get("mini"), r_.get("maxi")))
                     if not complet:
                         # Sur treize mois, calculer() produirait une « pire baisse sur 5
                         # ans » qui n'en couvre qu'un : on reporte la valeur hebdomadaire.
@@ -109,6 +129,8 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
 
             try:
                 db.ecrire_metriques(cn, calculees, lignes, series)
+                if complet:
+                    db.ecrire_resumes(cn, calculees, resumes)
                 cn.commit()
                 ok += len(calculees)
                 r.ok(len(calculees))

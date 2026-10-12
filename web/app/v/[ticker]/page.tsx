@@ -14,7 +14,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import Recherche from "@/app/composants/Recherche";
 import Graphe from "@/app/composants/Graphe";
 import Metriques from "@/app/composants/Metriques";
-import { cours, exercices, lienEdgar, metriques, series, societe } from "@/lib/queries";
+import { cours, exercices, historiques, lienEdgar, metriques, series, societe } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
 
 export const revalidate = 3600;
@@ -28,8 +28,9 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
   // Lectures indépendantes, lancées en parallèle : quatre allers-retours enchaînés vers
   // le pooler additionneraient leurs latences.
-  const [fy, points, lignes, pointsSeries] = await Promise.all([
+  const [fy, points, lignes, pointsSeries, resumes] = await Promise.all([
     exercices(s.cik), cours(s.company_id), metriques(s.company_id), series(s.company_id),
+    historiques(s.company_id),
   ]);
   const horsPerimetre = !["standard", "financial", "reit"].includes(s.mapping_profile);
   const qualite = s.data_quality_score === null ? null : Math.round(s.data_quality_score * 100);
@@ -68,7 +69,7 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
       {!horsPerimetre && (
         <div className="mt-14">
-          <Metriques lignes={lignes} series={pointsSeries} />
+          <Metriques lignes={lignes} series={pointsSeries} historiques={resumes} />
         </div>
       )}
 
