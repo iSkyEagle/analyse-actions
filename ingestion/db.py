@@ -911,3 +911,16 @@ def ecrire_resumes(cn, company_ids: list, lignes: list) -> None:
               and not exists (select 1 from _hist_stage s
                               where s.company_id = h.company_id and s.metric_id = h.metric_id)
         """)
+
+
+def charger_resumes(cn, company_ids: list) -> dict:
+    """{company_id: {metric_id: résumé}} — les résumés hebdomadaires, pour le verdict."""
+    if not company_ids:
+        return {}
+    with cn.cursor() as c:
+        c.execute("select company_id, metric_id, couverture, p10, mediane, p90 from metric_history "
+                  "where company_id = any(%s::smallint[])", (tableau(company_ids),))
+        out: dict = {}
+        for cid, mid, cv, p10, med, p90 in c.fetchall():
+            out.setdefault(cid, {})[mid] = {"couverture": cv, "p10": p10, "mediane": med, "p90": p90}
+        return out

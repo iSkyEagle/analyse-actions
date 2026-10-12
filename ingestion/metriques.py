@@ -122,6 +122,63 @@ METRIQUES = [
 ]
 PAR_ID = {m.id: m for m in METRIQUES}
 
+# =============================================================================
+# EXPLICATIONS — une ligne par métrique, en mots simples (étape 4d)
+#
+# Ce que la mesure dit, et dans quel sens elle se lit. Jamais de conseil : « plus il
+# est bas, moins le marché paie », pas « un PER bas est une opportunité ».
+# =============================================================================
+EXPLICATIONS = {
+    # --- valorisation
+    "per": "Prix payé pour un dollar de bénéfice annuel. Plus il est élevé, plus le marché paie cher les bénéfices actuels, souvent parce qu'il attend de la croissance.",
+    "prix_ventes": "Prix payé pour un dollar de chiffre d'affaires annuel. Utile quand la société ne fait pas encore de bénéfice.",
+    "prix_valeur_comptable": "Prix payé pour un dollar de capitaux propres inscrits au bilan. La mesure de référence pour les banques.",
+    "ve_ebitda": "Prix de toute l'entreprise, dette comprise et trésorerie déduite, rapporté à son résultat d'exploitation avant amortissements. Compare des sociétés plus ou moins endettées.",
+    "ve_fcf": "Prix de toute l'entreprise, dette comprise, rapporté au cash qu'elle génère après ses investissements.",
+    "rendement_dividende": "Dividendes versés sur un an, rapportés au prix de l'action.",
+    "taux_distribution": "Part du bénéfice reversée en dividendes. Au-delà de 100 %, la société distribue plus qu'elle ne gagne.",
+    "taux_distribution_ffo": "Part du cash généré (le FFO) reversée en dividendes. La mesure d'usage pour une foncière : au-delà de 100 %, le dividende n'est plus couvert.",
+    "prix_ffo": "Le PER des foncières : prix rapporté au résultat avant amortissement des immeubles, une charge comptable qui ne sort pas de la caisse.",
+    "peg_historique": "PER divisé par la croissance annuelle passée du résultat net. Autour de 1, le prix est en ligne avec la croissance passée ; la croissance future peut être différente.",
+    # --- qualité
+    "marge_brute": "Ce qui reste du chiffre d'affaires après le coût direct de ce qui est vendu. Mesure la force du produit face à ses coûts.",
+    "marge_operationnelle": "Ce qui reste du chiffre d'affaires après toutes les dépenses d'exploitation. Mesure l'efficacité de l'activité elle-même.",
+    "marge_nette": "Ce qui reste du chiffre d'affaires une fois tout payé, impôts et intérêts compris.",
+    "roe": "Bénéfice rapporté à l'argent des actionnaires. Une valeur élevée peut venir d'une activité rentable, ou d'un fort endettement.",
+    "roic": "Rentabilité de tout l'argent investi dans l'activité, celui des actionnaires comme celui des prêteurs.",
+    "dette_nette_ebitda": "Nombre d'années de résultat d'exploitation qu'il faudrait pour rembourser la dette, trésorerie déduite. Négatif : la société a plus de cash que de dette.",
+    "couverture_interets": "Combien de fois le résultat d'exploitation couvre les intérêts de la dette. Sous 2, la marge de sécurité est mince.",
+    "ratio_liquidite": "Ce que la société possède à court terme face à ce qu'elle doit à court terme. Sous 1, elle doit plus qu'elle ne possède sur l'année.",
+    # --- croissance
+    "cagr_ca_3a": "Croissance annuelle moyenne du chiffre d'affaires sur les trois derniers exercices.",
+    "cagr_ca_5a": "Croissance annuelle moyenne du chiffre d'affaires sur les cinq derniers exercices.",
+    "cagr_rn_3a": "Croissance annuelle moyenne du résultat net sur trois exercices. Non calculée si le résultat est négatif à l'une des deux dates.",
+    "cagr_rn_5a": "Croissance annuelle moyenne du résultat net sur cinq exercices. Non calculée si le résultat est négatif à l'une des deux dates.",
+    "cagr_bpa_3a": "Croissance annuelle du bénéfice par action sur trois exercices, corrigée des divisions d'actions. Plus rapide que le résultat net quand la société rachète ses actions.",
+    "cagr_bpa_5a": "Croissance annuelle du bénéfice par action sur cinq exercices, corrigée des divisions d'actions.",
+    "cagr_fcf_5a": "Croissance annuelle moyenne du cash généré après investissements, sur cinq exercices.",
+    "croissance_trimestre": "Chiffre d'affaires du dernier trimestre comparé au même trimestre un an plus tôt.",
+    "rendement_total_1a": "Ce qu'aurait rapporté l'action sur un an, dividendes réinvestis.",
+    "ecart_sp500_1a": "Rendement total de l'action moins celui du S&P 500 sur un an, dividendes réinvestis des deux côtés.",
+    "rendement_total_3a": "Rendement annuel moyen de l'action sur trois ans, dividendes réinvestis.",
+    "ecart_sp500_3a": "Écart annuel moyen avec le S&P 500 sur trois ans, dividendes réinvestis des deux côtés.",
+    "rendement_total_5a": "Rendement annuel moyen de l'action sur cinq ans, dividendes réinvestis.",
+    "ecart_sp500_5a": "Écart annuel moyen avec le S&P 500 sur cinq ans, dividendes réinvestis des deux côtés.",
+    # --- dilution
+    "cagr_actions_1a": "Évolution du nombre d'actions sur un an. En hausse, chaque action détient une part plus petite de l'entreprise ; en baisse, la société rachète ses actions.",
+    "cagr_actions_3a": "Évolution annuelle moyenne du nombre d'actions sur trois ans, corrigée des divisions d'actions.",
+    "cagr_actions_5a": "Évolution annuelle moyenne du nombre d'actions sur cinq ans, corrigée des divisions. Un saut brutal signale souvent une introduction en bourse ou une fusion.",
+    "sbc_ventes": "Salaires payés en actions, rapportés au chiffre d'affaires. Une dépense réelle, qui dilue les actionnaires au lieu de sortir de la caisse.",
+    "rendement_rachats_nets": "Rachats d'actions moins émissions sur un an, rapportés au prix de la société. Positif : la société rend du cash à ses actionnaires.",
+    "autonomie": "Pour une société qui consomme du cash : combien de trimestres sa trésorerie peut tenir au rythme actuel, avant de devoir lever des fonds.",
+    # --- risque
+    "volatilite_1a": "Ampleur habituelle des variations du cours sur un an, ramenée à l'année. Le S&P 500 tourne autour de 15 à 20 %.",
+    "drawdown_max_5a": "Plus forte chute du cours depuis un sommet, sur cinq ans : ce qu'aurait perdu, au pire moment, qui avait acheté au plus haut.",
+    "distance_plus_haut_52s": "Écart entre le cours actuel et son plus haut de l'année écoulée.",
+    "beta_5a": "Sensibilité de l'action aux mouvements du marché. À 1, elle bouge comme le S&P 500 ; à 2, deux fois plus ; sous 1, moins.",
+}
+
+
 # Métriques qui exigent cinq ans de cours. Elles ne sont recalculées qu'au passage
 # hebdomadaire complet : le passage quotidien ne lit que treize mois de cours et
 # reporte leur dernière valeur connue. Relire cinq ans pour tout l'univers chaque soir
@@ -679,6 +736,84 @@ def beta_mensuel(serie: list, indice: list, mois: int = 60, minimum: int = 36) -
     return cov / var if var > 0 else None
 
 # =============================================================================
+# ÉTAPE 4d — VERDICT DE VALORISATION FACE À L'HISTORIQUE
+#
+# Situe le multiple de référence du jour dans sa propre distribution sur 5 ans.
+# Indépendant du secteur par construction : la société est comparée à elle-même.
+# La comparaison au secteur viendra en phase 3, comme une seconde affirmation.
+#
+# Le verdict est DESCRIPTIF : « moins chère que d'habitude », jamais « peu chère ».
+# Recalculé chaque soir avec les cours ; la phrase elle-même est composée par
+# l'interface, à partir du code de palier, du multiple et de sa médiane.
+# =============================================================================
+# Multiple de référence par profil, avec repli si le premier n'est pas applicable
+# (société en perte : pas de PER) ou n'a pas d'historique suffisant.
+REFERENCE_VALORISATION = {
+    "standard": ("per", "prix_ventes"),
+    "financial": ("prix_valeur_comptable", "per"),
+    "reit": ("prix_ffo", "prix_ventes"),
+}
+
+# Paliers, du plus bas au plus haut. La position z vaut 0 à la médiane, -1 au 10e
+# centile, +1 au 90e : elle s'adapte à la dispersion propre à chaque société — un écart
+# de 15 % est énorme pour Coca-Cola, anodin pour NVIDIA.
+PALIERS = ("parmi_plus_bas", "moins_cher", "moyenne", "plus_cher", "parmi_plus_hauts")
+_SEUILS = (-1.0, -0.5, 0.5, 1.0)
+# Pour changer de palier, il faut franchir le seuil de cette marge : une action qui
+# oscille autour d'une frontière ne doit pas changer de verdict un jour sur deux.
+MARGE_PALIER = 0.15
+VERDICT_ID = "_verdict_valorisation"
+
+
+def position_historique(valeur: float, resume: dict) -> Optional[float]:
+    """z : 0 à la médiane, -1 au 10e centile, +1 au 90e. Au-delà, plus loin que ±1."""
+    med, p10, p90 = resume.get("mediane"), resume.get("p10"), resume.get("p90")
+    if med is None or p10 is None or p90 is None or valeur is None:
+        return None
+    if valeur >= med:
+        return (valeur - med) / (p90 - med) if p90 > med else 0.0
+    return -(med - valeur) / (med - p10) if med > p10 else 0.0
+
+
+def _palier(z: float) -> int:
+    return sum(1 for s in _SEUILS if z > s) if z > _SEUILS[0] else 0
+
+
+def palier_stable(z: float, precedent: Optional[int]) -> int:
+    """Palier de z, avec une marge à franchir pour quitter le palier précédent."""
+    n = _palier(z)
+    if precedent is None or n == precedent:
+        return n
+    return _palier(z - MARGE_PALIER) if n > precedent else _palier(z + MARGE_PALIER)
+
+
+def verdict_valorisation(res: dict, resumes: dict, profil: str,
+                         precedent: Optional[str] = None) -> tuple:
+    """
+    (z | None, 'palier|multiple' | raison) — la forme d'une ligne de `metrics`.
+
+    `res` : métriques du jour ; `resumes` : {multiple: résumé sur 5 ans} ;
+    `precedent` : raison stockée la veille, pour la marge entre paliers. La marge ne
+    s'applique que si le multiple de référence n'a pas changé.
+    """
+    prec_palier, prec_multiple = None, None
+    if precedent and "|" in precedent:
+        code, prec_multiple = precedent.split("|", 1)
+        prec_palier = PALIERS.index(code) if code in PALIERS else None
+    for mid in REFERENCE_VALORISATION.get(profil, ()):
+        valeur = res.get(mid, (None,))[0]
+        r = resumes.get(mid)
+        if valeur is None or not r or (r.get("couverture") or 0) < 0.5 or r.get("mediane") is None:
+            continue
+        z = position_historique(valeur, r)
+        if z is None:
+            continue
+        p = palier_stable(z, prec_palier if prec_multiple == mid else None)
+        return (z, f"{PALIERS[p]}|{mid}")
+    return (None, "historique de valorisation insuffisant")
+
+
+# =============================================================================
 # EXPORT pour l'interface — python metriques.py > ../web/lib/metriques.json
 # =============================================================================
 AXES = [
@@ -693,9 +828,11 @@ if __name__ == "__main__":
     import json
     print(json.dumps({
         "axes": [{"id": a, "libelle": l} for a, l in AXES],
+        "reference_valorisation": REFERENCE_VALORISATION,
         "metriques": [
             {"id": m.id, "libelle": m.libelle, "axe": m.axe, "format": m.format,
-             "serie": m.serie_annuelle, "perte": m.perte, "note": m.note}
+             "serie": m.serie_annuelle, "perte": m.perte, "note": m.note,
+             "explication": EXPLICATIONS[m.id]}
             for m in METRIQUES
         ],
     }, ensure_ascii=False, indent=1))

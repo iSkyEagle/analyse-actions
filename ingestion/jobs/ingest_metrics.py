@@ -56,7 +56,7 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
     if tickers:
         with cn.cursor() as c:
             c.execute("select company_id, cik, ticker, sic, mapping_profile::text, history_years "
-                      "from companies where ticker = any(%s)", (tickers,))
+                      "from companies where ticker = any(%s::text[])", (db.tableau(tickers),))
             societes = c.fetchall()
     else:
         societes = db.select_universe(cn)
@@ -74,15 +74,20 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
                 divisions = db.charger_divisions(cn, ids)
                 dividendes = db.charger_dividendes(cn, ids, depuis)
                 with cn.cursor() as c:
-                    c.execute("select company_id, market_cap from companies where company_id = any(%s)", (ids,))
+                    # Listes passées en un seul littéral : texte de requête constant
+                    # (mémoire, §4, règle 1).
+                    c.execute("select company_id, market_cap from companies "
+                              "where company_id = any(%s::smallint[])", (db.tableau(ids),))
                     capis = dict(c.fetchall())
+                    # Valeurs de la veille : mesures longues à reporter en passage
+                    # quotidien, et verdict précédent pour la marge entre paliers.
                     conserves: dict = {}
-                    if not complet:
-                        c.execute("select company_id, metric_id, value, raison from metrics "
-                                  "where company_id = any(%s) and metric_id = any(%s)",
-                                  (ids, list(MQ.HISTORIQUE_LONG)))
-                        for cid, mid, v, rs in c.fetchall():
-                            conserves.setdefault(cid, {})[mid] = (v, rs)
+                    c.execute("select company_id, metric_id, value, raison from metrics "
+                              "where company_id = any(%s::smallint[]) and metric_id = any(%s::text[])",
+                              (db.tableau(ids), db.tableau(list(MQ.HISTORIQUE_LONG) + [MQ.VERDICT_ID])))
+                    for cid, mid, v, rs in c.fetchall():
+                        conserves.setdefault(cid, {})[mid] = (v, rs)
+                resumes_hebdo = {} if complet else db.charger_resumes(cn, ids)
             except Exception as e:
                 cn.rollback()
                 for s in lot:
@@ -102,14 +107,22 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
                                       indice=indice or None)
                     ser = MQ.serie_annuelle(exercices, profil)
                     if complet:
+                        resumes_soc = {}
                         hist = MQ.multiples_historiques(trimestres, exercices, jours,
                                                         divisions.get(company_id, []), profil)
                         for mid, valeurs in hist.items():
                             r_ = MQ.resume_historique(valeurs, None)
                             if r_:
+                                resumes_soc[mid] = r_
                                 resumes.append((company_id, mid, aujourdhui, r_["n"], r_["couverture"],
                                                 r_.get("p10"), r_.get("mediane"), r_.get("p90"),
                                                 r_.get("mini"), r_.get("maxi")))
+                    else:
+                        resumes_soc = resumes_hebdo.get(company_id, {})
+                    # Verdict de valorisation : multiple du jour face à son historique.
+                    res[MQ.VERDICT_ID] = MQ.verdict_valorisation(
+                        res, resumes_soc, profil,
+                        conserves.get(company_id, {}).get(MQ.VERDICT_ID, (None, None))[1])
                     if not complet:
                         # Sur treize mois, calculer() produirait une « pire baisse sur 5
                         # ans » qui n'en couvre qu'un : on reporte la valeur hebdomadaire.

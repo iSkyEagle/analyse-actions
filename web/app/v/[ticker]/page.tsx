@@ -14,6 +14,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import Recherche from "@/app/composants/Recherche";
 import Graphe from "@/app/composants/Graphe";
 import Metriques from "@/app/composants/Metriques";
+import Synthese from "@/app/composants/Synthese";
 import { cours, exercices, historiques, lienEdgar, metriques, series, societe } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
 
@@ -60,6 +61,11 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
           Valeur hors du périmètre d'analyse ({s.mapping_profile}) : ses comptes ne sont pas
           exploités, seuls ses cours sont suivis.
         </p>
+      )}
+
+      {!horsPerimetre && (
+        <Synthese lignes={lignes} historiques={resumes} profil={s.mapping_profile}
+                  auJour={points.length ? points[points.length - 1][0] : null} />
       )}
 
       <section className="mt-12" aria-labelledby="titre-cours">

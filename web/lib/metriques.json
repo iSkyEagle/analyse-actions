@@ -21,6 +21,20 @@
    "libelle": "Risque"
   }
  ],
+ "reference_valorisation": {
+  "standard": [
+   "per",
+   "prix_ventes"
+  ],
+  "financial": [
+   "prix_valeur_comptable",
+   "per"
+  ],
+  "reit": [
+   "prix_ffo",
+   "prix_ventes"
+  ]
+ },
  "metriques": [
   {
    "id": "per",
@@ -29,7 +43,8 @@
    "format": "multiple",
    "serie": false,
    "perte": false,
-   "note": "capitalisation / résultat net des 12 derniers mois"
+   "note": "capitalisation / résultat net des 12 derniers mois",
+   "explication": "Prix payé pour un dollar de bénéfice annuel. Plus il est élevé, plus le marché paie cher les bénéfices actuels, souvent parce qu'il attend de la croissance."
   },
   {
    "id": "prix_ventes",
@@ -38,7 +53,8 @@
    "format": "multiple",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Prix payé pour un dollar de chiffre d'affaires annuel. Utile quand la société ne fait pas encore de bénéfice."
   },
   {
    "id": "prix_valeur_comptable",
@@ -47,7 +63,8 @@
    "format": "multiple",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Prix payé pour un dollar de capitaux propres inscrits au bilan. La mesure de référence pour les banques."
   },
   {
    "id": "ve_ebitda",
@@ -56,7 +73,8 @@
    "format": "multiple",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Prix de toute l'entreprise, dette comprise et trésorerie déduite, rapporté à son résultat d'exploitation avant amortissements. Compare des sociétés plus ou moins endettées."
   },
   {
    "id": "ve_fcf",
@@ -65,7 +83,8 @@
    "format": "multiple",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Prix de toute l'entreprise, dette comprise, rapporté au cash qu'elle génère après ses investissements."
   },
   {
    "id": "rendement_dividende",
@@ -74,7 +93,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Dividendes versés sur un an, rapportés au prix de l'action."
   },
   {
    "id": "taux_distribution",
@@ -83,7 +103,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Part du bénéfice reversée en dividendes. Au-delà de 100 %, la société distribue plus qu'elle ne gagne."
   },
   {
    "id": "taux_distribution_ffo",
@@ -92,7 +113,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": "dividendes / (résultat net + amortissements) des 12 derniers mois — au-delà de 100 %, le dividende n'est plus couvert par le cash généré"
+   "note": "dividendes / (résultat net + amortissements) des 12 derniers mois — au-delà de 100 %, le dividende n'est plus couvert par le cash généré",
+   "explication": "Part du cash généré (le FFO) reversée en dividendes. La mesure d'usage pour une foncière : au-delà de 100 %, le dividende n'est plus couvert."
   },
   {
    "id": "prix_ffo",
@@ -101,7 +123,8 @@
    "format": "multiple",
    "serie": false,
    "perte": false,
-   "note": "capitalisation / (résultat net + amortissements) des 12 derniers mois"
+   "note": "capitalisation / (résultat net + amortissements) des 12 derniers mois",
+   "explication": "Le PER des foncières : prix rapporté au résultat avant amortissement des immeubles, une charge comptable qui ne sort pas de la caisse."
   },
   {
    "id": "peg_historique",
@@ -110,7 +133,8 @@
    "format": "multiple",
    "serie": false,
    "perte": false,
-   "note": "PER / croissance annuelle du résultat net sur 5 ans. Variante calculable du PEG, qui exige des prévisions d'analystes que nous n'avons pas."
+   "note": "PER / croissance annuelle du résultat net sur 5 ans. Variante calculable du PEG, qui exige des prévisions d'analystes que nous n'avons pas.",
+   "explication": "PER divisé par la croissance annuelle passée du résultat net. Autour de 1, le prix est en ligne avec la croissance passée ; la croissance future peut être différente."
   },
   {
    "id": "marge_brute",
@@ -119,7 +143,8 @@
    "format": "pourcentage",
    "serie": true,
    "perte": true,
-   "note": ""
+   "note": "",
+   "explication": "Ce qui reste du chiffre d'affaires après le coût direct de ce qui est vendu. Mesure la force du produit face à ses coûts."
   },
   {
    "id": "marge_operationnelle",
@@ -128,7 +153,8 @@
    "format": "pourcentage",
    "serie": true,
    "perte": true,
-   "note": ""
+   "note": "",
+   "explication": "Ce qui reste du chiffre d'affaires après toutes les dépenses d'exploitation. Mesure l'efficacité de l'activité elle-même."
   },
   {
    "id": "marge_nette",
@@ -137,7 +163,8 @@
    "format": "pourcentage",
    "serie": true,
    "perte": true,
-   "note": ""
+   "note": "",
+   "explication": "Ce qui reste du chiffre d'affaires une fois tout payé, impôts et intérêts compris."
   },
   {
    "id": "roe",
@@ -146,7 +173,8 @@
    "format": "pourcentage",
    "serie": true,
    "perte": true,
-   "note": ""
+   "note": "",
+   "explication": "Bénéfice rapporté à l'argent des actionnaires. Une valeur élevée peut venir d'une activité rentable, ou d'un fort endettement."
   },
   {
    "id": "roic",
@@ -155,7 +183,8 @@
    "format": "pourcentage",
    "serie": true,
    "perte": true,
-   "note": ""
+   "note": "",
+   "explication": "Rentabilité de tout l'argent investi dans l'activité, celui des actionnaires comme celui des prêteurs."
   },
   {
    "id": "dette_nette_ebitda",
@@ -164,7 +193,8 @@
    "format": "multiple",
    "serie": true,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Nombre d'années de résultat d'exploitation qu'il faudrait pour rembourser la dette, trésorerie déduite. Négatif : la société a plus de cash que de dette."
   },
   {
    "id": "couverture_interets",
@@ -173,7 +203,8 @@
    "format": "multiple",
    "serie": true,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Combien de fois le résultat d'exploitation couvre les intérêts de la dette. Sous 2, la marge de sécurité est mince."
   },
   {
    "id": "ratio_liquidite",
@@ -182,7 +213,8 @@
    "format": "multiple",
    "serie": true,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Ce que la société possède à court terme face à ce qu'elle doit à court terme. Sous 1, elle doit plus qu'elle ne possède sur l'année."
   },
   {
    "id": "cagr_ca_3a",
@@ -191,7 +223,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Croissance annuelle moyenne du chiffre d'affaires sur les trois derniers exercices."
   },
   {
    "id": "cagr_ca_5a",
@@ -200,7 +233,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Croissance annuelle moyenne du chiffre d'affaires sur les cinq derniers exercices."
   },
   {
    "id": "cagr_rn_3a",
@@ -209,7 +243,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Croissance annuelle moyenne du résultat net sur trois exercices. Non calculée si le résultat est négatif à l'une des deux dates."
   },
   {
    "id": "cagr_rn_5a",
@@ -218,7 +253,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Croissance annuelle moyenne du résultat net sur cinq exercices. Non calculée si le résultat est négatif à l'une des deux dates."
   },
   {
    "id": "cagr_bpa_3a",
@@ -227,7 +263,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Croissance annuelle du bénéfice par action sur trois exercices, corrigée des divisions d'actions. Plus rapide que le résultat net quand la société rachète ses actions."
   },
   {
    "id": "cagr_bpa_5a",
@@ -236,7 +273,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Croissance annuelle du bénéfice par action sur cinq exercices, corrigée des divisions d'actions."
   },
   {
    "id": "cagr_fcf_5a",
@@ -245,7 +283,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Croissance annuelle moyenne du cash généré après investissements, sur cinq exercices."
   },
   {
    "id": "croissance_trimestre",
@@ -254,7 +293,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Chiffre d'affaires du dernier trimestre comparé au même trimestre un an plus tôt."
   },
   {
    "id": "rendement_total_1a",
@@ -263,7 +303,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Ce qu'aurait rapporté l'action sur un an, dividendes réinvestis."
   },
   {
    "id": "ecart_sp500_1a",
@@ -272,7 +313,8 @@
    "format": "points",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Rendement total de l'action moins celui du S&P 500 sur un an, dividendes réinvestis des deux côtés."
   },
   {
    "id": "rendement_total_3a",
@@ -281,7 +323,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Rendement annuel moyen de l'action sur trois ans, dividendes réinvestis."
   },
   {
    "id": "ecart_sp500_3a",
@@ -290,7 +333,8 @@
    "format": "points",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Écart annuel moyen avec le S&P 500 sur trois ans, dividendes réinvestis des deux côtés."
   },
   {
    "id": "rendement_total_5a",
@@ -299,7 +343,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Rendement annuel moyen de l'action sur cinq ans, dividendes réinvestis."
   },
   {
    "id": "ecart_sp500_5a",
@@ -308,7 +353,8 @@
    "format": "points",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Écart annuel moyen avec le S&P 500 sur cinq ans, dividendes réinvestis des deux côtés."
   },
   {
    "id": "cagr_actions_1a",
@@ -317,7 +363,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Évolution du nombre d'actions sur un an. En hausse, chaque action détient une part plus petite de l'entreprise ; en baisse, la société rachète ses actions."
   },
   {
    "id": "cagr_actions_3a",
@@ -326,7 +373,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Évolution annuelle moyenne du nombre d'actions sur trois ans, corrigée des divisions d'actions."
   },
   {
    "id": "cagr_actions_5a",
@@ -335,7 +383,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Évolution annuelle moyenne du nombre d'actions sur cinq ans, corrigée des divisions. Un saut brutal signale souvent une introduction en bourse ou une fusion."
   },
   {
    "id": "sbc_ventes",
@@ -344,7 +393,8 @@
    "format": "pourcentage",
    "serie": true,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Salaires payés en actions, rapportés au chiffre d'affaires. Une dépense réelle, qui dilue les actionnaires au lieu de sortir de la caisse."
   },
   {
    "id": "rendement_rachats_nets",
@@ -353,7 +403,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Rachats d'actions moins émissions sur un an, rapportés au prix de la société. Positif : la société rend du cash à ses actionnaires."
   },
   {
    "id": "autonomie",
@@ -362,7 +413,8 @@
    "format": "trimestres",
    "serie": false,
    "perte": false,
-   "note": "trésorerie / consommation trimestrielle, pour les sociétés qui brûlent du cash"
+   "note": "trésorerie / consommation trimestrielle, pour les sociétés qui brûlent du cash",
+   "explication": "Pour une société qui consomme du cash : combien de trimestres sa trésorerie peut tenir au rythme actuel, avant de devoir lever des fonds."
   },
   {
    "id": "volatilite_1a",
@@ -371,7 +423,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Ampleur habituelle des variations du cours sur un an, ramenée à l'année. Le S&P 500 tourne autour de 15 à 20 %."
   },
   {
    "id": "drawdown_max_5a",
@@ -380,7 +433,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Plus forte chute du cours depuis un sommet, sur cinq ans : ce qu'aurait perdu, au pire moment, qui avait acheté au plus haut."
   },
   {
    "id": "distance_plus_haut_52s",
@@ -389,7 +443,8 @@
    "format": "pourcentage",
    "serie": false,
    "perte": false,
-   "note": ""
+   "note": "",
+   "explication": "Écart entre le cours actuel et son plus haut de l'année écoulée."
   },
   {
    "id": "beta_5a",
@@ -398,7 +453,8 @@
    "format": "multiple",
    "serie": false,
    "perte": false,
-   "note": "rendements mensuels sur 5 ans face au S&P 500, dividendes réinvestis — la convention de Yahoo"
+   "note": "rendements mensuels sur 5 ans face au S&P 500, dividendes réinvestis — la convention de Yahoo",
+   "explication": "Sensibilité de l'action aux mouvements du marché. À 1, elle bouge comme le S&P 500 ; à 2, deux fois plus ; sous 1, moins."
   }
  ]
 }
