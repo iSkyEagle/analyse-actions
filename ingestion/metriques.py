@@ -964,6 +964,21 @@ def _note_historique(z: float) -> float:
     return max(0.0, min(10.0, 5.0 - z * 10.0 / 3.0))
 
 
+def reference_notee(profil: str, raisons: dict) -> str:
+    """
+    Multiple de référence de la note : le premier de REFERENCE_VALORISATION qui a un
+    sens pour la société — prix sur ventes pour une société en perte, comme le verdict.
+    Sans ce repli, le PER sorti du calcul laissait la comparaison au secteur et
+    l'historique à poids égaux ; chez une valeur passée par une bulle, l'historique
+    flattait la note (IonQ, 4,5 en valorisation à plus de 50 fois ses ventes).
+    """
+    liste = REFERENCE_VALORISATION.get(profil, ("per",))
+    for m in liste:
+        if profil in PAR_ID[m].profils and not sans_objet_note(raisons.get(m)):
+            return m
+    return liste[0]
+
+
 def noter(profil: str, valeurs: dict, positions: dict, verdict_z: Optional[float],
           raisons: Optional[dict] = None) -> dict:
     """
@@ -980,7 +995,7 @@ def noter(profil: str, valeurs: dict, positions: dict, verdict_z: Optional[float
     trop petit — réduit la couverture et son poids va aux autres (règle 2).
     """
     raisons = raisons or {}
-    ref = REFERENCE_VALORISATION.get(profil, ("per",))[0]
+    ref = reference_notee(profil, raisons)
     out = {}
     for axe in AXES_NOTES:
         total = poids_notes = somme = 0.0
@@ -992,6 +1007,10 @@ def noter(profil: str, valeurs: dict, positions: dict, verdict_z: Optional[float
                     somme += poids * _note_historique(verdict_z); poids_notes += poids; n += 1
                 continue
             vrai = ref if mid == REF_VALO else mid
+            # Le repli (prix sur ventes d'une société en perte) a déjà pris le poids du
+            # multiple de référence : il ne compte pas une seconde fois.
+            if mid != REF_VALO and mid == ref:
+                continue
             if profil not in PAR_ID[vrai].profils or sans_objet_note(raisons.get(vrai)):
                 continue
             total += poids

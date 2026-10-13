@@ -22,6 +22,7 @@ export type Societe = {
   market_cap: number | null;
   market_cap_as_of: string | null;
   market_cap_uncertain: boolean;
+  shares_estimated: boolean;
   data_quality_score: number | null;
   fiscal_years_available: number | null;
   in_universe: boolean;
@@ -59,7 +60,7 @@ export async function societe(ticker: string): Promise<Societe | null> {
   const lignes = await query<Societe>(
     `select company_id, history_years, cik, ticker, name, exchange, sector, industry,
             mapping_profile::text as mapping_profile,
-            market_cap, market_cap_as_of, market_cap_uncertain,
+            market_cap, market_cap_as_of, market_cap_uncertain, shares_estimated,
             data_quality_score, fiscal_years_available, in_universe,
             prices_refreshed_at, prices_rebuilt_at, fundamentals_refreshed_at, last_xbrl_filing
      from companies

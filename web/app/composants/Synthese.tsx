@@ -304,8 +304,17 @@ const SANS_OBJET = new Set<string>(config.sans_objet_note);
 function Criteres({ axe, par, profil, groupes, verdict }: {
   axe: Axe; par: Map<string, LigneMetrique>; profil: string; groupes: Groupes; verdict: string;
 }) {
-  const ref = (config.reference_valorisation as Record<string, string[]>)[profil]?.[0] ?? "per";
+  // Même repli que metriques.reference_notee : le premier multiple de référence qui a un
+  // sens pour la société. Le multiple écarté reste affiché, hors calcul.
+  const liste = (config.reference_valorisation as Record<string, string[]>)[profil] ?? ["per"];
+  const interpretable = (m: string) => {
+    const r = par.get(m)?.raison ?? "";
+    return !r.startsWith("sans objet") && !SANS_OBJET.has(r);
+  };
+  const ref = liste.find(interpretable) ?? liste[0];
+  const ecarte = ref !== liste[0] ? liste[0] : null;
   const rangs = NOTATION[axe].flatMap((c) => {
+    if (c.id !== "_reference" && c.id === ref) return [];       // déjà compté comme référence
     if (c.id === "_historique") {
       return [{ cle: c.id, libelle: "Multiple de référence face à son historique sur 5 ans", poids: c.poids,
                 sens: c.sens, valeur: null as string | null,
@@ -317,8 +326,14 @@ function Criteres({ axe, par, profil, groupes, verdict }: {
     const def = config.metriques.find((m) => m.id === id);
     // Sans objet pour ce profil : hors du calcul, donc hors de la liste.
     if (!def || !l || l.raison?.startsWith("sans objet")) return [];
+    const avant = c.id === "_reference" && ecarte ? (() => {
+      const de = config.metriques.find((m) => m.id === ecarte)!;
+      return [{ cle: ecarte, libelle: de.libelle, poids: 1, sens: c.sens, valeur: null as string | null,
+                position: null as string | null,
+                raison: `hors calcul : ${par.get(ecarte)?.raison} ; son poids passe au ${def.libelle.toLowerCase()}` }];
+    })() : [];
     const p = l.percentile;
-    return [{
+    return [...avant, {
       cle: id, libelle: def.libelle, poids: c.poids, sens: c.sens,
       valeur: l.value !== null ? metrique(l.value, def.format) : null,
       position: p === null || !l.percentile_niveau ? null

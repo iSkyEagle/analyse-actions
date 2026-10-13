@@ -129,6 +129,7 @@ def run(source: str, limit: int | None, tickers: list | None, refresh_dump: bool
                 # profil provisoire remis par le passage mensuel de l'univers.
                 if res.mapping_profile != profile:
                     db.ecrire_profil(cn, cik, res.mapping_profile)
+                db.ecrire_actions(cn, res)
                 inchangees += 1
                 refreshed.append(cik)
                 r.ok()
@@ -171,6 +172,9 @@ def main() -> None:
     p.add_argument("--sic", type=str, default=None,
                    help="codes SIC ou plages, séparés par des virgules (6324,6500-6599) : "
                         "toutes les sociétés de ces codes, univers ou non ; force --source api")
+    p.add_argument("--sans-actions", action="store_true",
+                   help="seulement les sociétés sans nombre d'actions (repli multi-catégories) ; "
+                        "force --source api")
     p.add_argument("--refresh-dump", action="store_true")
     p.add_argument("--force", action="store_true",
                    help="réécrit même à date de dépôt inchangée : à utiliser après un "
@@ -184,7 +188,24 @@ def main() -> None:
     if a.sic:
         tickers = tickers_par_sic(a.sic)
         logging.getLogger("ingest.fundamentals").info("%d sociétés pour les codes SIC %s", len(tickers), a.sic)
+    if a.sans_actions:
+        tickers = tickers_sans_actions()
+        logging.getLogger("ingest.fundamentals").info("%d sociétés sans nombre d'actions", len(tickers))
     run("api" if tickers else a.source, a.limit, tickers, a.refresh_dump, a.force)
+
+
+def tickers_sans_actions() -> list:
+    """Sociétés aux comptes exploitables dont le nombre d'actions manque."""
+    cn = db.connect()
+    with cn.cursor() as c:
+        c.execute("""
+            select ticker from companies
+            where cik is not null and shares_outstanding is null
+              and mapping_profile::text in ('standard', 'financial', 'reit')
+        """)
+        out = [t for (t,) in c.fetchall()]
+    cn.close()
+    return out
 
 
 def tickers_par_sic(spec: str) -> list:

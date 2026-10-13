@@ -277,13 +277,14 @@ def update_company_facts(cn, res: FundamentalsResult, sic: Optional[int] = None)
               mapping_profile = %s,
               shares_outstanding = %s,
               shares_as_of = %s,
+              shares_estimated = %s,
               last_xbrl_filing = %s,
               data_quality_score = %s,
               fiscal_years_available = %s,
               updated_at = now()
             where ticker = %s
         """, (sic, res.mapping_profile, _clean(res.shares_outstanding), res.shares_as_of,
-              res.last_filing, res.data_quality_score, res.fiscal_years, res.ticker))
+              res.shares_estimated, res.last_filing, res.data_quality_score, res.fiscal_years, res.ticker))
 
 
 def refresh_market_caps(cn) -> int:
@@ -317,7 +318,10 @@ def refresh_market_caps(cn) -> int:
             update companies c set
               market_cap = c.shares_outstanding * d.close_adj,
               market_cap_as_of = d.dt,
-              market_cap_uncertain = exists (select 1 from multi m where m.cik = c.cik),
+              -- Incertaine aussi quand le nombre d'actions vient du repli sur les actions
+              -- diluées : la seconde catégorie d'actions n'y figure pas toujours.
+              market_cap_uncertain = c.shares_estimated
+                                     or exists (select 1 from multi m where m.cik = c.cik),
               updated_at = now()
             from dernier d
             where d.company_id = c.company_id and c.shares_outstanding is not null
@@ -969,6 +973,22 @@ def ecrire_profil(cn, cik: int, profil: str) -> None:
     with cn.cursor() as c:
         c.execute("update companies set mapping_profile = %s::mapping_profile_t, updated_at = now() "
                   "where cik = %s and mapping_profile::text is distinct from %s", (profil, cik, profil))
+
+
+def ecrire_actions(cn, res) -> None:
+    """
+    Nombre d'actions seul, pour une société sans dépôt nouveau : une règle de lecture
+    révisée (repli multi-catégories) doit s'appliquer sans réécrire ses comptes.
+    """
+    with cn.cursor() as c:
+        c.execute("""
+            update companies set shares_outstanding = %s, shares_as_of = %s,
+                   shares_estimated = %s, updated_at = now()
+            where cik = %s
+              and (shares_outstanding, shares_as_of, shares_estimated)
+                  is distinct from (%s::float8, %s::date, %s::boolean)
+        """, (_clean(res.shares_outstanding), res.shares_as_of, res.shares_estimated, res.cik,
+              _clean(res.shares_outstanding), res.shares_as_of, res.shares_estimated))
 
 
 # =============================================================================

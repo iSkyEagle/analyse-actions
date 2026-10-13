@@ -140,9 +140,22 @@ class _EdgarBase(FundamentalsProvider):
                     .get("EntityCommonStockSharesOutstanding", {})
                     .get("units", {}).get("shares", []))
         shares = shares_at = None
+        estime = False
         if dei:
             last = max(dei, key=lambda e: (e["end"], e["filed"]))
             shares, shares_at = last["val"], _d(last["end"])
+        else:
+            # Plusieurs catégories d'actions (NuScale, indie…) : le nombre est déclaré par
+            # catégorie, et companyfacts, qui supprime les dimensions, n'en garde rien.
+            # Sans repli, pas de capitalisation, donc hors univers : 412 sociétés en
+            # octobre 2026. Repli sur les actions diluées de la dernière période déposée,
+            # même source EDGAR, capitalisation marquée incertaine : la seconde catégorie
+            # n'y figure pas toujours.
+            avec = [r for r in rows if (r.values.get("shares_diluted") or r.values.get("shares_basic"))]
+            if avec:
+                der = max(avec, key=lambda r: (r.period_end, r.fiscal_period != "FY"))
+                shares = der.values.get("shares_diluted") or der.values.get("shares_basic")
+                shares_at, estime = der.period_end, True
 
         return FundamentalsResult(
             cik=issuer.cik,
@@ -153,6 +166,7 @@ class _EdgarBase(FundamentalsProvider):
             fiscal_years=elog.fiscal_years,
             shares_outstanding=shares,
             shares_as_of=shares_at,
+            shares_estimated=estime,
             last_filing=max((r.filed for r in rows if r.filed), default=None),
             unmapped_tags=elog.unmapped_frequent_tags,
         )

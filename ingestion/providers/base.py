@@ -93,6 +93,7 @@ class FundamentalsResult:
     fiscal_years: int
     shares_outstanding: Optional[float] = None
     shares_as_of: Optional[date] = None
+    shares_estimated: bool = False          # repli : actions diluées du dernier trimestre
     last_filing: Optional[date] = None
     unmapped_tags: list = field(default_factory=list)
 

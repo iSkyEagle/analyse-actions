@@ -57,7 +57,9 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
         <p className="mt-5 max-w-[68ch] leading-relaxed text-encre-seconde">
           {s.market_cap !== null ? (
             <>Capitalisation de {dollars(s.market_cap)} au {date(s.market_cap_as_of)}
-              {s.market_cap_uncertain && ", incertaine : plusieurs classes d'actions"}. </>
+              {s.market_cap_uncertain && (s.shares_estimated
+                ? ", estimée : plusieurs catégories d'actions, comptées sur les actions diluées du dernier trimestre déposé"
+                : ", incertaine : plusieurs classes d'actions")}. </>
           ) : "Capitalisation inconnue. "}
           {qualite !== null && <>Données complètes à {qualite} % sur {s.fiscal_years_available ?? 0} exercices, </>}
           dernier dépôt le {date(s.last_xbrl_filing)}. {s.exchange}, CIK {s.cik}.
