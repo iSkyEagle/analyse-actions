@@ -1044,15 +1044,33 @@ def ecrire_percentiles(cn, positions: list, stats: list) -> int:
 # Étape 3c — notes
 # =============================================================================
 def charger_pour_notes(cn) -> dict:
-    """{company_id: (profil, z du verdict de valorisation)} pour les sociétés analysées."""
+    """
+    {company_id: (profil, z du verdict, {metric_id: raison des valeurs absentes})}.
+
+    Seulement les sociétés qui ont au moins une métrique chiffrée : les autres — hors
+    univers, jamais calculées — n'ont rien à noter. Sans ce filtre, chacune recevait cinq
+    lignes vides (5 766 lignes sur 19 697 en octobre 2026).
+    """
     with cn.cursor() as c:
         c.execute("""
             select co.company_id, co.mapping_profile::text, v.value
             from companies co
             left join metrics v on v.company_id = co.company_id and v.metric_id = '_verdict_valorisation'
             where co.mapping_profile::text in ('standard', 'financial', 'reit')
+              and exists (select 1 from metrics m
+                          where m.company_id = co.company_id and m.value is not null
+                            and m.metric_id not like '\\_%%')
         """)
-        return {cid: (prof, z) for cid, prof, z in c.fetchall()}
+        out = {cid: (prof, z, {}) for cid, prof, z in c.fetchall()}
+        # Les raisons servent à distinguer le non-interprétable du manquant (règle 2).
+        c.execute("""
+            select company_id, metric_id, raison from metrics
+            where value is null and raison is not null and metric_id not like '\\_%%'
+        """)
+        for cid, mid, raison in c.fetchall():
+            if cid in out:
+                out[cid][2][mid] = raison
+        return out
 
 
 def ecrire_notes(cn, lignes: list) -> int:

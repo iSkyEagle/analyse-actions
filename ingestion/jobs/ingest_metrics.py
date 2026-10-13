@@ -177,9 +177,9 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
             for cid, mid, p, *_ in positions:
                 rangs.setdefault(cid, {})[mid] = p
             a_ecrire = []
-            for cid, (profil, z) in db.charger_pour_notes(cn).items():
+            for cid, (profil, z, raisons) in db.charger_pour_notes(cn).items():
                 for axe, (note, couverture, nb) in MQ.noter(profil, valeurs.get(cid, {}),
-                                                            rangs.get(cid, {}), z).items():
+                                                            rangs.get(cid, {}), z, raisons).items():
                     if axe == "globale" and note is None:
                         continue            # règle 3 : pas de ligne sous trois axes notés
                     # Couverture tronquée, pas arrondie : 49,6 % reste sous le seuil de 50 %

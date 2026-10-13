@@ -259,8 +259,11 @@ function NoteGlobale({ notes }: { notes: Note[] }) {
             fois, des actions en circulation qui augmentent de plus de 10 % par an.
           </p>
           <p>
-            Un axe n'est noté que si la moitié au moins de ses critères sont disponibles ; la
-            note globale est la moyenne des axes notés, à partir de trois. Elle situe la
+            Un critère qui n'a pas de sens pour la société — un PER quand elle est en perte,
+            une couverture des intérêts quand elle n'a pas de dette — sort du calcul. Une
+            donnée manquante, elle, compte : un axe n'est noté que si la moitié au moins de
+            ses critères sont disponibles. La note globale est la moyenne des axes notés, à
+            partir de trois. Elle situe la
             société parmi ses comparables : ce n'est pas une recommandation.
           </p>
         </div>
@@ -291,6 +294,7 @@ function NoteAxe({ note }: { note?: Note }) {
 
 type Critere = { id: string; poids: number; sens: "haut" | "bas" };
 const NOTATION = config.notation as Record<Axe, Critere[]>;
+const SANS_OBJET = new Set<string>(config.sans_objet_note);
 
 /**
  * Les critères d'une note, dépliables sous son axe (règle 3) : valeur et position dans
@@ -320,7 +324,11 @@ function Criteres({ axe, par, profil, groupes, verdict }: {
       position: p === null || !l.percentile_niveau ? null
         : `${p >= 50 ? `au-dessus de ${Math.min(p, 99)} %` : `en dessous de ${Math.min(100 - p, 99)} %`}`
           + ` · ${nomGroupe(l.percentile_niveau, groupes)}`,
-      raison: l.value === null ? (l.raison ?? "non disponible") : p === null ? "groupe de comparaison trop petit" : null,
+      // Règle 2 : un critère non interprétable (PER en perte…) est hors calcul, pas
+      // manquant. On le montre, pour qu'on voie pourquoi il ne pèse pas.
+      raison: l.value === null
+        ? (SANS_OBJET.has(l.raison ?? "") ? `hors calcul : ${l.raison}` : (l.raison ?? "non disponible"))
+        : p === null ? "groupe de comparaison trop petit" : null,
     }];
   });
   if (rangs.length === 0) return null;

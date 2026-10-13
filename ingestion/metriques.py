@@ -922,6 +922,31 @@ SEUILS_ABSOLUS = {
     "cagr_actions_5a": lambda v: v > 0.10,
 }
 COUVERTURE_MIN = 0.5            # règle 2 : sous 50 % du poids applicable, pas de note
+
+# Règle 2 du mémoire : une valeur NON INTERPRÉTABLE n'est pas une valeur MANQUANTE. Un PER
+# en perte, une croissance mesurée depuis une base négative, une couverture des intérêts
+# sans dette n'ont pas de sens : le critère sort du calcul ET du dénominateur, son poids
+# va aux autres. Une donnée absente — historique trop court, champ non déclaré, groupe
+# trop petit — fait au contraire baisser la couverture. Les pertes restent pénalisées
+# par les marges, dans l'axe qualité. Ces raisons sont celles que posent les formules
+# ci-dessus, au caractère près.
+SANS_OBJET_NOTE = frozenset({
+    "résultat négatif sur 12 mois",
+    "EBITDA négatif",
+    "flux de trésorerie libre négatif",
+    "FFO négatif",
+    "capitaux propres négatifs",
+    "capitaux investis négatifs",
+    "pas de chiffre d'affaires",
+    "valeur de départ ou d'arrivée négative ou nulle",
+    "aucune dette",
+    "pas de charge d'intérêts",
+    "génère du cash",
+})
+
+
+def sans_objet_note(raison: Optional[str]) -> bool:
+    return raison is not None and (raison in SANS_OBJET_NOTE or raison.startswith("sans objet"))
 AXES_MIN_GLOBALE = 3            # règle 3 : pas de note globale sous trois axes notés
 
 # Profil en mots (règle 3) : descriptif et relatif aux sociétés comparables.
@@ -939,18 +964,22 @@ def _note_historique(z: float) -> float:
     return max(0.0, min(10.0, 5.0 - z * 10.0 / 3.0))
 
 
-def noter(profil: str, valeurs: dict, positions: dict, verdict_z: Optional[float]) -> dict:
+def noter(profil: str, valeurs: dict, positions: dict, verdict_z: Optional[float],
+          raisons: Optional[dict] = None) -> dict:
     """
     {axe: (note sur 10 | None, couverture 0-1, nombre de critères notés)} et 'globale'.
 
     `valeurs`   : {metric_id: valeur}, pour les seuils absolus ;
     `positions` : {metric_id: percentile 0-100} ;
-    `verdict_z` : position du multiple de référence face à son historique.
+    `verdict_z` : position du multiple de référence face à son historique ;
+    `raisons`   : {metric_id: raison} des valeurs absentes.
 
     Une métrique sans objet pour le profil sort du calcul ET du dénominateur : ce n'est
-    pas un manque d'information. Une métrique applicable mais absente — un PER en perte,
-    un groupe trop petit — réduit la couverture et son poids va aux autres (règle 2).
+    pas un manque d'information. Une valeur non interprétable — un PER en perte — non
+    plus (SANS_OBJET_NOTE). Une donnée réellement absente — historique trop court, groupe
+    trop petit — réduit la couverture et son poids va aux autres (règle 2).
     """
+    raisons = raisons or {}
     ref = REFERENCE_VALORISATION.get(profil, ("per",))[0]
     out = {}
     for axe in AXES_NOTES:
@@ -963,7 +992,7 @@ def noter(profil: str, valeurs: dict, positions: dict, verdict_z: Optional[float
                     somme += poids * _note_historique(verdict_z); poids_notes += poids; n += 1
                 continue
             vrai = ref if mid == REF_VALO else mid
-            if profil not in PAR_ID[vrai].profils:
+            if profil not in PAR_ID[vrai].profils or sans_objet_note(raisons.get(vrai)):
                 continue
             total += poids
             p = positions.get(vrai)
@@ -1004,6 +1033,7 @@ if __name__ == "__main__":
         "seuils_mots": SEUILS_MOTS,
         # Critères de chaque note, pour les déplier sous l'axe (règle 3) ; le calcul
         # reste ici, l'interface ne fait que les lister.
+        "sans_objet_note": sorted(SANS_OBJET_NOTE),
         "notation": {axe: [{"id": m, "poids": p, "sens": sens} for m, p, sens in crit]
                      for axe, crit in NOTATION.items()},
         "metriques": [

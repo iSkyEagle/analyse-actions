@@ -40,6 +40,8 @@ AUTRE = "Non classé"
 
 SECTEURS = (TECH, COMM, CYCL, BASE, SANTE, FIN, IMMO, INDU, MAT, NRJ, UTIL)
 
+QUANTIQUE = "Informatique quantique"     # industrie sans code SIC : corrections seules
+
 # (premier code, dernier code, secteur, industrie). Plages inclusives.
 PLAGES = [
     # --- 01-09 : agriculture, forêt, pêche --------------------------------------------
@@ -215,6 +217,17 @@ CORRECTIONS = {
             "électriques ; ne reste que les moteurs d'avion depuis 2024"),
     51143: (TECH, "Services informatiques", "IBM : SIC 3570, matériel ; l'essentiel de "
             "ses revenus vient du logiciel et du conseil"),
+    # Informatique quantique (décidé le 13 octobre 2026) : machines vendues, accès par le
+    # cloud et contrats publics, en forte perte et en forte croissance. Ni un éditeur de
+    # logiciels à 75 % de marge brute, ni un fabricant de PC mûr. Moins de 15 sociétés :
+    # les comparaisons se font sur tout le secteur technologie, le repère le plus honnête.
+    1824920: (TECH, QUANTIQUE, "IonQ : codé en logiciels ; fabrique des ordinateurs "
+              "quantiques à ions piégés"),
+    1907982: (TECH, QUANTIQUE, "D-Wave Quantum : codé en traitement de données ; "
+              "fabrique des ordinateurs quantiques à recuit"),
+    1838359: (TECH, QUANTIQUE, "Rigetti Computing : fabrique des ordinateurs quantiques "
+              "supraconducteurs"),
+    1758009: (TECH, QUANTIQUE, "Quantum Computing Inc. : machines quantiques photoniques"),
 }
 
 
