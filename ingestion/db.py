@@ -1038,3 +1038,47 @@ def ecrire_percentiles(cn, positions: list, stats: list) -> int:
                               and s.groupe = g.groupe and s.metric_id = g.metric_id)
         """)
     return n
+
+
+# =============================================================================
+# Étape 3c — notes
+# =============================================================================
+def charger_pour_notes(cn) -> dict:
+    """{company_id: (profil, z du verdict de valorisation)} pour les sociétés analysées."""
+    with cn.cursor() as c:
+        c.execute("""
+            select co.company_id, co.mapping_profile::text, v.value
+            from companies co
+            left join metrics v on v.company_id = co.company_id and v.metric_id = '_verdict_valorisation'
+            where co.mapping_profile::text in ('standard', 'financial', 'reit')
+        """)
+        return {cid: (prof, z) for cid, prof, z in c.fetchall()}
+
+
+def ecrire_notes(cn, lignes: list) -> int:
+    """
+    Remplace les notes, en différentiel. `lignes` : (company_id, axe, score 0-100 | None,
+    couverture_pct, n). Une note globale absente (moins de trois axes) n'a pas de ligne.
+    """
+    aujourdhui = date.today()
+    with cn.cursor() as c:
+        c.execute("create temp table if not exists _note_stage (company_id smallint, axis text, "
+                  "score smallint, coverage_pct smallint, n_applicable smallint) on commit drop")
+        c.execute("truncate _note_stage")
+        copier(c, "_note_stage", ["company_id", "axis", "score", "coverage_pct", "n_applicable"], lignes)
+        c.execute("""
+            insert into scores (company_id, as_of, axis, score, coverage_pct, n_applicable)
+            select company_id, %s, axis::score_axis_t, score, coverage_pct, n_applicable from _note_stage
+            on conflict (company_id, axis) do update set
+              as_of = excluded.as_of, score = excluded.score, coverage_pct = excluded.coverage_pct,
+              n_applicable = excluded.n_applicable
+              where (scores.score, scores.coverage_pct, scores.n_applicable)
+                    is distinct from (excluded.score, excluded.coverage_pct, excluded.n_applicable)
+        """, (aujourdhui,))
+        n = c.rowcount
+        c.execute("""
+            delete from scores s
+            where not exists (select 1 from _note_stage t
+                              where t.company_id = s.company_id and t.axis = s.axis::text)
+        """)
+        return n + c.rowcount

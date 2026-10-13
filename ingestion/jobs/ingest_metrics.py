@@ -23,6 +23,7 @@ Usage :
 from __future__ import annotations
 
 import argparse
+import math
 import logging
 import time
 from datetime import date, timedelta
@@ -163,11 +164,31 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
     # son groupe. Chaque soir — les multiples bougent avec les cours.
     if not tickers:
         try:
-            positions, stats = MQ.percentiles(db.charger_pour_percentiles(cn))
+            lignes_pct = db.charger_pour_percentiles(cn)
+            positions, stats = MQ.percentiles(lignes_pct)
             n = db.ecrire_percentiles(cn, positions, stats)
             cn.commit()
             log.info("percentiles : %d positions, %d distributions de groupe, %d lignes modifiées",
                      len(positions), len(stats), n)
+            # Notes : à partir des percentiles du jour (étape 3c).
+            valeurs, rangs = {}, {}
+            for cid, mid, v, *_ in lignes_pct:
+                valeurs.setdefault(cid, {})[mid] = v
+            for cid, mid, p, *_ in positions:
+                rangs.setdefault(cid, {})[mid] = p
+            a_ecrire = []
+            for cid, (profil, z) in db.charger_pour_notes(cn).items():
+                for axe, (note, couverture, nb) in MQ.noter(profil, valeurs.get(cid, {}),
+                                                            rangs.get(cid, {}), z).items():
+                    if axe == "globale" and note is None:
+                        continue            # règle 3 : pas de ligne sous trois axes notés
+                    # Couverture tronquée, pas arrondie : 49,6 % reste sous le seuil de 50 %
+                    # que la contrainte de la table impose.
+                    a_ecrire.append((cid, axe, None if note is None else round(note * 10),
+                                     math.floor(couverture * 100), nb))
+            n = db.ecrire_notes(cn, a_ecrire)
+            cn.commit()
+            log.info("notes : %d lignes, %d modifiées", len(a_ecrire), n)
         except Exception as e:
             cn.rollback()
             log.error("percentiles non calculés : %s: %s", type(e).__name__, e)

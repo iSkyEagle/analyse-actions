@@ -874,6 +874,117 @@ def percentiles(lignes: list) -> tuple[list, list]:
 
 
 # =============================================================================
+# ÉTAPE 3c — NOTES PAR AXE ET NOTE GLOBALE
+#
+# Règles 1 à 3 du mémoire. Chaque métrique est notée de 0 à 10 d'après sa position dans
+# son groupe de comparaison, dans le sens qui convient : une marge élevée note haut, un
+# PER élevé note bas. La note d'un axe est la moyenne pondérée des métriques notables.
+# Les poids sont des hypothèses assumées, validées le 13 octobre 2026.
+# =============================================================================
+HAUT, BAS = "haut", "bas"       # sens dans lequel la métrique est favorable
+
+# Pseudo-métriques de l'axe valorisation, résolues selon le profil.
+REF_VALO = "_reference"         # multiple de référence : PER, valeur comptable, FFO
+HISTO_VALO = "_historique"      # position du multiple de référence face à son historique
+
+NOTATION = {
+    "valorisation": [
+        (REF_VALO, 2.0, BAS), (HISTO_VALO, 1.0, BAS), ("prix_ventes", 1.0, BAS),
+        ("ve_ebitda", 1.0, BAS), ("ve_fcf", 1.0, BAS),
+    ],
+    "qualite": [
+        ("roic", 1.5, HAUT), ("marge_operationnelle", 1.0, HAUT), ("marge_nette", 1.0, HAUT),
+        ("roe", 1.0, HAUT), ("dette_nette_ebitda", 1.0, BAS), ("couverture_interets", 1.0, HAUT),
+        ("marge_brute", 0.5, HAUT),
+    ],
+    "croissance": [
+        ("cagr_ca_3a", 1.0, HAUT), ("cagr_ca_5a", 1.0, HAUT), ("cagr_bpa_3a", 1.0, HAUT),
+        ("cagr_bpa_5a", 1.0, HAUT), ("cagr_fcf_5a", 1.0, HAUT),
+        ("croissance_trimestre", 0.5, HAUT), ("ecart_sp500_3a", 0.5, HAUT),
+    ],
+    # Le mémoire réunit dilution et risque en un seul axe ; le risque y pèse peu.
+    "dilution": [
+        ("cagr_actions_3a", 1.5, BAS), ("cagr_actions_5a", 1.0, BAS), ("cagr_actions_1a", 0.5, BAS),
+        ("sbc_ventes", 1.0, BAS), ("rendement_rachats_nets", 1.0, HAUT), ("autonomie", 1.0, HAUT),
+        ("volatilite_1a", 0.5, BAS), ("drawdown_max_5a", 0.5, HAUT),
+    ],
+}
+AXES_NOTES = ("valorisation", "qualite", "croissance", "dilution")
+
+# Seuils absolus du mémoire (règle 1) : franchis, ils plafonnent la note de la métrique,
+# quel que soit son rang. Être le moins endetté d'un secteur très endetté ne rend pas solide.
+PLAFOND_ABSOLU = 2.0
+SEUILS_ABSOLUS = {
+    "dette_nette_ebitda": lambda v: v > 4,
+    "couverture_interets": lambda v: v < 2,
+    "cagr_actions_1a": lambda v: v > 0.10,
+    "cagr_actions_3a": lambda v: v > 0.10,
+    "cagr_actions_5a": lambda v: v > 0.10,
+}
+COUVERTURE_MIN = 0.5            # règle 2 : sous 50 % du poids applicable, pas de note
+AXES_MIN_GLOBALE = 3            # règle 3 : pas de note globale sous trois axes notés
+
+# Profil en mots (règle 3) : descriptif et relatif aux sociétés comparables.
+PROFIL_MOTS = {
+    "qualite": ("fondamentaux fragiles", "fondamentaux dans la moyenne", "fondamentaux solides"),
+    "valorisation": ("valorisation élevée", "valorisation dans la moyenne", "valorisation modeste"),
+    "croissance": ("croissance faible", "croissance dans la moyenne", "croissance forte"),
+    "dilution": ("dilution forte", "dilution modérée", "dilution faible"),
+}
+SEUILS_MOTS = (3.5, 6.5)        # note sur 10 : sous 3,5 / entre / au-dessus de 6,5
+
+
+def _note_historique(z: float) -> float:
+    """Position face à l'historique en note : 5 à la médiane, ~8,3 au 10e centile."""
+    return max(0.0, min(10.0, 5.0 - z * 10.0 / 3.0))
+
+
+def noter(profil: str, valeurs: dict, positions: dict, verdict_z: Optional[float]) -> dict:
+    """
+    {axe: (note sur 10 | None, couverture 0-1, nombre de critères notés)} et 'globale'.
+
+    `valeurs`   : {metric_id: valeur}, pour les seuils absolus ;
+    `positions` : {metric_id: percentile 0-100} ;
+    `verdict_z` : position du multiple de référence face à son historique.
+
+    Une métrique sans objet pour le profil sort du calcul ET du dénominateur : ce n'est
+    pas un manque d'information. Une métrique applicable mais absente — un PER en perte,
+    un groupe trop petit — réduit la couverture et son poids va aux autres (règle 2).
+    """
+    ref = REFERENCE_VALORISATION.get(profil, ("per",))[0]
+    out = {}
+    for axe in AXES_NOTES:
+        total = poids_notes = somme = 0.0
+        n = 0
+        for mid, poids, sens in NOTATION[axe]:
+            if mid == HISTO_VALO:
+                total += poids
+                if verdict_z is not None:
+                    somme += poids * _note_historique(verdict_z); poids_notes += poids; n += 1
+                continue
+            vrai = ref if mid == REF_VALO else mid
+            if profil not in PAR_ID[vrai].profils:
+                continue
+            total += poids
+            p = positions.get(vrai)
+            if p is None:
+                continue
+            note = p / 10.0 if sens == HAUT else (100 - p) / 10.0
+            seuil = SEUILS_ABSOLUS.get(vrai)
+            v = valeurs.get(vrai)
+            if seuil and v is not None and seuil(v):
+                note = min(note, PLAFOND_ABSOLU)
+            somme += poids * note; poids_notes += poids; n += 1
+        couverture = poids_notes / total if total else 0.0
+        note_axe = somme / poids_notes if poids_notes and couverture >= COUVERTURE_MIN else None
+        out[axe] = (note_axe, couverture, n)
+    notees = [out[a][0] for a in AXES_NOTES if out[a][0] is not None]
+    out["globale"] = ((sum(notees) / len(notees)) if len(notees) >= AXES_MIN_GLOBALE else None,
+                      len(notees) / len(AXES_NOTES), len(notees))
+    return out
+
+
+# =============================================================================
 # EXPORT pour l'interface — python metriques.py > ../web/lib/metriques.json
 # =============================================================================
 AXES = [
@@ -889,6 +1000,12 @@ if __name__ == "__main__":
     print(json.dumps({
         "axes": [{"id": a, "libelle": l} for a, l in AXES],
         "reference_valorisation": REFERENCE_VALORISATION,
+        "profil_mots": PROFIL_MOTS,
+        "seuils_mots": SEUILS_MOTS,
+        # Critères de chaque note, pour les déplier sous l'axe (règle 3) ; le calcul
+        # reste ici, l'interface ne fait que les lister.
+        "notation": {axe: [{"id": m, "poids": p, "sens": sens} for m, p, sens in crit]
+                     for axe, crit in NOTATION.items()},
         "metriques": [
             {"id": m.id, "libelle": m.libelle, "axe": m.axe, "format": m.format,
              "serie": m.serie_annuelle, "perte": m.perte, "note": m.note,

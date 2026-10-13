@@ -131,6 +131,21 @@ export async function series(companyId: number): Promise<PointSerie[]> {
   );
 }
 
+/** Note d'un axe ou note globale (étape 3c), sur 100 ; null sous 50 % de couverture. */
+export type Note = {
+  axis: "valorisation" | "qualite" | "croissance" | "dilution" | "globale";
+  score: number | null; coverage_pct: number; n_applicable: number; as_of: string;
+};
+
+/** Notes calculées à l'ingestion par metriques.noter : l'interface ne note rien. */
+export async function notes(companyId: number): Promise<Note[]> {
+  return query<Note>(
+    `select axis::text as axis, score, coverage_pct, n_applicable, as_of
+     from scores where company_id = $1`,
+    [companyId],
+  );
+}
+
 export type ResumeHistorique = {
   metric_id: string; couverture: number; p10: number | null; mediane: number | null;
   p90: number | null; mini: number | null; maxi: number | null; as_of: string;

@@ -15,7 +15,7 @@ import Recherche from "@/app/composants/Recherche";
 import Graphe from "@/app/composants/Graphe";
 import Metriques from "@/app/composants/Metriques";
 import Synthese from "@/app/composants/Synthese";
-import { cours, exercices, historiques, lienEdgar, metriques, series, societe, statsGroupes } from "@/lib/queries";
+import { cours, exercices, historiques, lienEdgar, metriques, notes, series, societe, statsGroupes } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
 
 export const revalidate = 3600;
@@ -29,9 +29,9 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
   // Lectures indépendantes, lancées en parallèle : quatre allers-retours enchaînés vers
   // le pooler additionneraient leurs latences.
-  const [fy, points, lignes, pointsSeries, resumes, stats] = await Promise.all([
+  const [fy, points, lignes, pointsSeries, resumes, stats, lesNotes] = await Promise.all([
     exercices(s.cik), cours(s.company_id), metriques(s.company_id), series(s.company_id),
-    historiques(s.company_id), statsGroupes(s.industry, s.sector),
+    historiques(s.company_id), statsGroupes(s.industry, s.sector), notes(s.company_id),
   ]);
   const groupes = { industrie: s.industry, secteur: s.sector, stats };
   const horsPerimetre = !["standard", "financial", "reit"].includes(s.mapping_profile);
@@ -73,7 +73,8 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
       {!horsPerimetre && (
         <Synthese lignes={lignes} historiques={resumes} profil={s.mapping_profile}
-                  auJour={points.length ? points[points.length - 1][0] : null} groupes={groupes} />
+                  auJour={points.length ? points[points.length - 1][0] : null} groupes={groupes}
+                  notes={lesNotes} />
       )}
 
       <section className="mt-12" aria-labelledby="titre-cours">

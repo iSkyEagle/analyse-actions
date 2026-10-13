@@ -35,6 +35,177 @@
    "prix_ventes"
   ]
  },
+ "profil_mots": {
+  "qualite": [
+   "fondamentaux fragiles",
+   "fondamentaux dans la moyenne",
+   "fondamentaux solides"
+  ],
+  "valorisation": [
+   "valorisation élevée",
+   "valorisation dans la moyenne",
+   "valorisation modeste"
+  ],
+  "croissance": [
+   "croissance faible",
+   "croissance dans la moyenne",
+   "croissance forte"
+  ],
+  "dilution": [
+   "dilution forte",
+   "dilution modérée",
+   "dilution faible"
+  ]
+ },
+ "seuils_mots": [
+  3.5,
+  6.5
+ ],
+ "notation": {
+  "valorisation": [
+   {
+    "id": "_reference",
+    "poids": 2.0,
+    "sens": "bas"
+   },
+   {
+    "id": "_historique",
+    "poids": 1.0,
+    "sens": "bas"
+   },
+   {
+    "id": "prix_ventes",
+    "poids": 1.0,
+    "sens": "bas"
+   },
+   {
+    "id": "ve_ebitda",
+    "poids": 1.0,
+    "sens": "bas"
+   },
+   {
+    "id": "ve_fcf",
+    "poids": 1.0,
+    "sens": "bas"
+   }
+  ],
+  "qualite": [
+   {
+    "id": "roic",
+    "poids": 1.5,
+    "sens": "haut"
+   },
+   {
+    "id": "marge_operationnelle",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "marge_nette",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "roe",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "dette_nette_ebitda",
+    "poids": 1.0,
+    "sens": "bas"
+   },
+   {
+    "id": "couverture_interets",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "marge_brute",
+    "poids": 0.5,
+    "sens": "haut"
+   }
+  ],
+  "croissance": [
+   {
+    "id": "cagr_ca_3a",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "cagr_ca_5a",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "cagr_bpa_3a",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "cagr_bpa_5a",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "cagr_fcf_5a",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "croissance_trimestre",
+    "poids": 0.5,
+    "sens": "haut"
+   },
+   {
+    "id": "ecart_sp500_3a",
+    "poids": 0.5,
+    "sens": "haut"
+   }
+  ],
+  "dilution": [
+   {
+    "id": "cagr_actions_3a",
+    "poids": 1.5,
+    "sens": "bas"
+   },
+   {
+    "id": "cagr_actions_5a",
+    "poids": 1.0,
+    "sens": "bas"
+   },
+   {
+    "id": "cagr_actions_1a",
+    "poids": 0.5,
+    "sens": "bas"
+   },
+   {
+    "id": "sbc_ventes",
+    "poids": 1.0,
+    "sens": "bas"
+   },
+   {
+    "id": "rendement_rachats_nets",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "autonomie",
+    "poids": 1.0,
+    "sens": "haut"
+   },
+   {
+    "id": "volatilite_1a",
+    "poids": 0.5,
+    "sens": "bas"
+   },
+   {
+    "id": "drawdown_max_5a",
+    "poids": 0.5,
+    "sens": "haut"
+   }
+  ]
+ },
  "metriques": [
   {
    "id": "per",
