@@ -15,7 +15,7 @@ import Recherche from "@/app/composants/Recherche";
 import Graphe from "@/app/composants/Graphe";
 import Metriques from "@/app/composants/Metriques";
 import Synthese from "@/app/composants/Synthese";
-import { cours, exercices, historiques, lienEdgar, metriques, series, societe } from "@/lib/queries";
+import { cours, exercices, historiques, lienEdgar, metriques, series, societe, statsGroupes } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
 
 export const revalidate = 3600;
@@ -29,10 +29,11 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
   // Lectures indépendantes, lancées en parallèle : quatre allers-retours enchaînés vers
   // le pooler additionneraient leurs latences.
-  const [fy, points, lignes, pointsSeries, resumes] = await Promise.all([
+  const [fy, points, lignes, pointsSeries, resumes, stats] = await Promise.all([
     exercices(s.cik), cours(s.company_id), metriques(s.company_id), series(s.company_id),
-    historiques(s.company_id),
+    historiques(s.company_id), statsGroupes(s.industry, s.sector),
   ]);
+  const groupes = { industrie: s.industry, secteur: s.sector, stats };
   const horsPerimetre = !["standard", "financial", "reit"].includes(s.mapping_profile);
   const qualite = s.data_quality_score === null ? null : Math.round(s.data_quality_score * 100);
 
@@ -46,6 +47,13 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
       <header className="mt-12">
         <h1 className="text-[2.75rem] font-semibold leading-none tracking-tight">{s.ticker}</h1>
         <p className="mt-3 text-xl">{s.name}</p>
+        {s.industry && s.sector && s.sector !== "Non classé" && (
+          // L'industrie d'abord, la plus parlante ; le secteur la situe. Ce sont aussi
+          // les deux groupes de comparaison de la phase 3.
+          <p className="mt-1 text-encre-seconde">
+            {s.industry === s.sector ? s.sector : <>{s.industry}, secteur {s.sector.toLowerCase()}</>}
+          </p>
+        )}
         <p className="mt-5 max-w-[68ch] leading-relaxed text-encre-seconde">
           {s.market_cap !== null ? (
             <>Capitalisation de {dollars(s.market_cap)} au {date(s.market_cap_as_of)}
@@ -65,7 +73,7 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
       {!horsPerimetre && (
         <Synthese lignes={lignes} historiques={resumes} profil={s.mapping_profile}
-                  auJour={points.length ? points[points.length - 1][0] : null} />
+                  auJour={points.length ? points[points.length - 1][0] : null} groupes={groupes} />
       )}
 
       <section className="mt-12" aria-labelledby="titre-cours">
@@ -75,7 +83,7 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
       {!horsPerimetre && (
         <div className="mt-14">
-          <Metriques lignes={lignes} series={pointsSeries} historiques={resumes} />
+          <Metriques lignes={lignes} series={pointsSeries} historiques={resumes} groupes={groupes} />
         </div>
       )}
 

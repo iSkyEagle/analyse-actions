@@ -57,6 +57,9 @@ export function datesEnClair(texte: string): string {
 
 /** Valeur d'une métrique selon son format déclaré dans metriques.json. */
 export function metrique(v: number, format: string): string {
+  // Une valeur qui s'arrondit à zéro s'affiche « 0 », jamais « −0,0 ».
+  const seuil = format === "pourcentage" || format === "points" ? 0.0005 : 0.05;
+  if (Math.abs(v) < seuil) v = 0;
   if (format === "pourcentage") {
     const d = Math.abs(v) >= 10 ? 0 : 1;
     return new Intl.NumberFormat("fr-FR", { style: "percent", minimumFractionDigits: d, maximumFractionDigits: d }).format(v);

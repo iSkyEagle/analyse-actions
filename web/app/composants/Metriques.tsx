@@ -14,6 +14,7 @@ import { datesEnClair, metrique } from "@/lib/format";
 import type { LigneMetrique, PointSerie, ResumeHistorique } from "@/lib/queries";
 import Tendance from "./Tendance";
 import RegleHistorique, { regleAffichable, type Resume } from "./RegleHistorique";
+import { phrasePosition, type Groupes } from "@/lib/groupes";
 
 type Def = (typeof config.metriques)[number];
 
@@ -21,10 +22,12 @@ export default function Metriques({
   lignes,
   series,
   historiques = [],
+  groupes,
 }: {
   lignes: LigneMetrique[];
   series: PointSerie[];
   historiques?: ResumeHistorique[];
+  groupes: Groupes;
 }) {
   if (lignes.length === 0) {
     return (
@@ -81,7 +84,7 @@ export default function Metriques({
               <div>
                 {utiles.map((m) => (
                   <Ligne key={m.id} def={m} ligne={parId.get(m.id)!} serie={seriesPar.get(m.id) ?? []}
-                         resume={resumes.get(m.id)} />
+                         resume={resumes.get(m.id)} groupes={groupes} />
                 ))}
               </div>
               {axe.id === "valorisation" && base && (
@@ -97,9 +100,10 @@ export default function Metriques({
   );
 }
 
-function Ligne({ def, ligne, serie, resume }: {
-  def: Def; ligne: LigneMetrique; serie: PointSerie[]; resume?: Resume;
+function Ligne({ def, ligne, serie, resume, groupes }: {
+  def: Def; ligne: LigneMetrique; serie: PointSerie[]; resume?: Resume; groupes: Groupes;
 }) {
+  const position = phrasePosition(ligne, def.format, groupes);
   const v = ligne.value;
   const perte = def.perte && v !== null && v < 0;
   // Une société qui n'a jamais versé de dividende : « 0,0 % » et une règle plate
@@ -132,6 +136,7 @@ function Ligne({ def, ligne, serie, resume }: {
       </summary>
       <div className="max-w-[62ch] px-2 pb-3 text-sm leading-relaxed text-encre-seconde">
         <p>{def.explication}</p>
+        {position && <p className="mt-1 text-encre">{position}</p>}
         {def.note && <p className="mt-1">Calcul : {def.note.replace(/\.?$/, ".")}</p>}
       </div>
     </details>

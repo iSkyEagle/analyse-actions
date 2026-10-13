@@ -17,6 +17,7 @@
 import config from "@/lib/metriques.json";
 import { date, metrique } from "@/lib/format";
 import type { LigneMetrique, ResumeHistorique } from "@/lib/queries";
+import { phrasePosition, type Groupes } from "@/lib/groupes";
 import RegleHistorique, { regleAffichable } from "./RegleHistorique";
 
 const VERDICTS: Record<string, string> = {
@@ -34,7 +35,10 @@ const LIBELLE_COURT: Record<string, string> = {
   prix_ffo: "prix sur FFO",
 };
 
-type Ligne = { titre: string; phrase: string; detail?: string; perte?: boolean; regle?: React.ReactNode };
+type Ligne = {
+  titre: string; phrase: string; detail?: string; comparaison?: string | null;
+  perte?: boolean; regle?: React.ReactNode;
+};
 
 /** Première métrique disponible d'une liste, avec son identifiant. */
 function premiere(par: Map<string, LigneMetrique>, ids: string[]) {
@@ -53,11 +57,13 @@ export default function Synthese({
   historiques,
   profil,
   auJour,
+  groupes,
 }: {
   lignes: LigneMetrique[];
   historiques: ResumeHistorique[];
   profil: string;
   auJour: string | null;
+  groupes: Groupes;
 }) {
   const par = new Map(lignes.map((l) => [l.metric_id, l]));
   const resumes = new Map(historiques.map((h) => [h.metric_id, h]));
@@ -83,6 +89,8 @@ export default function Synthese({
           + `contre une médiane de ${metrique(r.mediane, def.format)} sur 5 ans`
           + (auJour ? `, au ${date(auJour)}.` : ".") + repli
         : undefined,
+      // Seconde affirmation, distincte de la première : face aux sociétés comparables.
+      comparaison: phrasePosition(par.get(mid), def.format, groupes),
       regle: v !== null && regleAffichable(r, v)
         ? <RegleHistorique actuelle={v} resume={r!} format={def.format} libelle={def.libelle} />
         : undefined,
@@ -101,6 +109,7 @@ export default function Synthese({
       phrase: qualite.v < 0
         ? `${lib} négative, à ${metrique(qualite.v, "pourcentage")} : la société est en perte.`
         : `${lib} de ${metrique(qualite.v, "pourcentage")}.`,
+      comparaison: phrasePosition(par.get(qualite.id), "pourcentage", groupes),
       perte: qualite.v < 0,
     });
   }
@@ -112,6 +121,7 @@ export default function Synthese({
       titre: "Croissance",
       phrase: `Chiffre d'affaires en ${ca.v >= 0 ? "hausse" : "baisse"} de ${pct(ca.v)} par an `
         + `sur ${horizon(ca.id)}.`,
+      comparaison: phrasePosition(par.get(ca.id), "pourcentage", groupes),
     });
   }
 
@@ -126,6 +136,7 @@ export default function Synthese({
         : act.v > 0
           ? `Nombre d'actions en hausse de ${pct(act.v)} par an sur ${h} : chaque action détient une part plus petite de l'entreprise.`
           : `Nombre d'actions en baisse de ${pct(act.v)} par an sur ${h} : la société rachète ses actions.`,
+      comparaison: phrasePosition(par.get(act.id), "pourcentage", groupes),
     });
   }
 
@@ -143,6 +154,7 @@ export default function Synthese({
                 {l.regle}
               </div>
               {l.detail && <p className="mt-1 max-w-[62ch] text-encre-seconde">{l.detail}</p>}
+              {l.comparaison && <p className="mt-1 max-w-[62ch] text-encre-seconde">{l.comparaison}</p>}
             </dd>
           </div>
         ))}

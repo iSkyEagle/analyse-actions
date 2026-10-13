@@ -159,6 +159,19 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
                     r.fail(stage="ecriture", reason=type(e).__name__, detail=f"company_id {cid}: {e}")
             log.info("  %d / %d", min(i + LOT, len(societes)), len(societes))
 
+    # Percentiles : une fois toutes les métriques écrites, chaque société est située dans
+    # son groupe. Chaque soir — les multiples bougent avec les cours.
+    if not tickers:
+        try:
+            positions, stats = MQ.percentiles(db.charger_pour_percentiles(cn))
+            n = db.ecrire_percentiles(cn, positions, stats)
+            cn.commit()
+            log.info("percentiles : %d positions, %d distributions de groupe, %d lignes modifiées",
+                     len(positions), len(stats), n)
+        except Exception as e:
+            cn.rollback()
+            log.error("percentiles non calculés : %s: %s", type(e).__name__, e)
+
     log.info("%d sociétés calculées en %.1f s (%s)", ok, time.monotonic() - debut,
              "complet, cinq ans de cours" if complet else "quotidien, treize mois de cours")
     cn.close()

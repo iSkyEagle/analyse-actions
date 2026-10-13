@@ -969,3 +969,72 @@ def ecrire_profil(cn, cik: int, profil: str) -> None:
     with cn.cursor() as c:
         c.execute("update companies set mapping_profile = %s::mapping_profile_t, updated_at = now() "
                   "where cik = %s and mapping_profile::text is distinct from %s", (profil, cik, profil))
+
+
+# =============================================================================
+# Étape 3b — percentiles sectoriels
+# =============================================================================
+def charger_pour_percentiles(cn) -> list:
+    """
+    Toutes les métriques chiffrées, avec secteur, industrie et appartenance à l'univers.
+
+    Lecture de toute la table `metrics` : inhérent à un percentile, qui compare chaque
+    société à toutes les autres. Son volume est borné par la taille de l'univers — une
+    ligne par société et par métrique —, jamais par la profondeur de l'historique.
+    """
+    with cn.cursor() as c:
+        c.execute("""
+            select m.company_id, m.metric_id, m.value, co.sector, co.industry, co.in_universe
+            from metrics m join companies co using (company_id)
+            where m.value is not null and m.metric_id not like '\\_%%'
+        """)
+        return c.fetchall()
+
+
+def ecrire_percentiles(cn, positions: list, stats: list) -> int:
+    """Remplace percentiles et distributions, en différentiel. Renvoie les lignes modifiées."""
+    aujourdhui = date.today()
+    with cn.cursor() as c:
+        c.execute("create temp table if not exists _pct_stage (company_id smallint, metric_id text, "
+                  "percentile smallint, niveau text, n smallint) on commit drop")
+        c.execute("create temp table if not exists _gst_stage (niveau text, groupe text, metric_id text, "
+                  "n int, p10 float8, p25 float8, mediane float8, p75 float8, p90 float8) on commit drop")
+        c.execute("truncate _pct_stage, _gst_stage")
+        copier(c, "_pct_stage", ["company_id", "metric_id", "percentile", "niveau", "n"], positions)
+        copier(c, "_gst_stage", ["niveau", "groupe", "metric_id", "n", "p10", "p25", "mediane", "p75", "p90"],
+               [tuple(_clean(x) if isinstance(x, float) else x for x in s) for s in stats])
+        c.execute("""
+            update metrics m set percentile = s.percentile, percentile_niveau = s.niveau,
+                                 percentile_n = s.n
+            from _pct_stage s
+            where m.company_id = s.company_id and m.metric_id = s.metric_id
+              and (m.percentile, m.percentile_niveau, m.percentile_n)
+                  is distinct from (s.percentile, s.niveau, s.n)
+        """)
+        n = c.rowcount
+        # Une métrique devenue non applicable, ou dont le groupe est passé sous 15, perd
+        # son percentile au lieu de garder un rang périmé.
+        c.execute("""
+            update metrics m set percentile = null, percentile_niveau = null, percentile_n = null
+            where m.percentile is not null
+              and not exists (select 1 from _pct_stage s
+                              where s.company_id = m.company_id and s.metric_id = m.metric_id)
+        """)
+        n += c.rowcount
+        c.execute("""
+            insert into groupe_stats (niveau, groupe, metric_id, as_of, n, p10, p25, mediane, p75, p90)
+            select niveau, groupe, metric_id, %s, n, p10, p25, mediane, p75, p90 from _gst_stage
+            on conflict (niveau, groupe, metric_id) do update set
+              as_of = excluded.as_of, n = excluded.n, p10 = excluded.p10, p25 = excluded.p25,
+              mediane = excluded.mediane, p75 = excluded.p75, p90 = excluded.p90
+              where (groupe_stats.n, groupe_stats.p10, groupe_stats.p25, groupe_stats.mediane,
+                     groupe_stats.p75, groupe_stats.p90)
+                    is distinct from (excluded.n, excluded.p10, excluded.p25, excluded.mediane,
+                                      excluded.p75, excluded.p90)
+        """, (aujourdhui,))
+        c.execute("""
+            delete from groupe_stats g
+            where not exists (select 1 from _gst_stage s where s.niveau = g.niveau
+                              and s.groupe = g.groupe and s.metric_id = g.metric_id)
+        """)
+    return n

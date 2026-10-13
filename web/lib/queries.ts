@@ -17,6 +17,7 @@ export type Societe = {
   name: string;
   exchange: string;
   sector: string | null;
+  industry: string | null;
   mapping_profile: string;
   market_cap: number | null;
   market_cap_as_of: string | null;
@@ -56,7 +57,7 @@ export type Exercice = {
  */
 export async function societe(ticker: string): Promise<Societe | null> {
   const lignes = await query<Societe>(
-    `select company_id, history_years, cik, ticker, name, exchange, sector,
+    `select company_id, history_years, cik, ticker, name, exchange, sector, industry,
             mapping_profile::text as mapping_profile,
             market_cap, market_cap_as_of, market_cap_uncertain,
             data_quality_score, fiscal_years_available, in_universe,
@@ -90,7 +91,13 @@ export async function exercices(cik: number, n = 5): Promise<Exercice[]> {
   );
 }
 
-export type LigneMetrique = { metric_id: string; value: number | null; raison: string | null; as_of: string };
+export type LigneMetrique = {
+  metric_id: string; value: number | null; raison: string | null; as_of: string;
+  percentile: number | null; percentile_niveau: "industrie" | "secteur" | null; percentile_n: number | null;
+};
+
+/** Distribution d'une métrique dans un groupe de comparaison (étape 3b). */
+export type StatGroupe = { niveau: "industrie" | "secteur"; metric_id: string; n: number; mediane: number | null };
 export type PointSerie = { metric_id: string; period_end: string; value: number };
 
 /**
@@ -99,8 +106,19 @@ export type PointSerie = { metric_id: string; period_end: string; value: number 
  */
 export async function metriques(companyId: number): Promise<LigneMetrique[]> {
   return query<LigneMetrique>(
-    `select metric_id, value, raison, as_of from metrics where company_id = $1`,
+    `select metric_id, value, raison, as_of, percentile, percentile_niveau, percentile_n
+     from metrics where company_id = $1`,
     [companyId],
+  );
+}
+
+/** Distributions de l'industrie et du secteur de la société, pour citer leur médiane. */
+export async function statsGroupes(industrie: string | null, secteur: string | null): Promise<StatGroupe[]> {
+  if (!industrie && !secteur) return [];
+  return query<StatGroupe>(
+    `select niveau, metric_id, n, mediane from groupe_stats
+     where (niveau = 'industrie' and groupe = $1) or (niveau = 'secteur' and groupe = $2)`,
+    [industrie, secteur],
   );
 }
 

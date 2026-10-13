@@ -814,6 +814,66 @@ def verdict_valorisation(res: dict, resumes: dict, profil: str,
 
 
 # =============================================================================
+# ÉTAPE 3b — PERCENTILES SECTORIELS
+#
+# Règle 1 du mémoire : une métrique relative ne se juge que face à son secteur. Une
+# marge brute de 25 % est mauvaise pour un éditeur de logiciels, bonne pour un
+# distributeur. Ce module situe chaque valeur dans son groupe ; il ne la juge pas — la
+# notation viendra en 3c.
+# =============================================================================
+MIN_GROUPE = 15     # sous 15 sociétés, être premier ne prouve rien
+
+
+def _position(tries: list, v: float) -> float:
+    """Part des valeurs sous v, égalités pour moitié, en pour cent."""
+    from bisect import bisect_left, bisect_right
+    bas, haut = bisect_left(tries, v), bisect_right(tries, v)
+    return 100.0 * (bas + 0.5 * (haut - bas)) / len(tries)
+
+
+def _quantile(tries: list, p: float) -> float:
+    return tries[round(p * (len(tries) - 1))]
+
+
+def percentiles(lignes: list) -> tuple[list, list]:
+    """
+    `lignes` : (company_id, metric_id, valeur, secteur, industrie, dans_univers).
+
+    Les groupes de référence ne contiennent que les sociétés de l'univers ; toute société
+    classée reçoit sa position, y compris hors univers — une petite société se compare
+    ainsi aux sociétés suivies. Les valeurs non applicables sont absentes en amont : elles
+    ne comptent jamais comme des zéros (règle 2).
+
+    Renvoie :
+      positions — (company_id, metric_id, percentile 0-100, niveau, effectif)
+      stats     — (niveau, groupe, metric_id, n, p10, p25, médiane, p75, p90)
+    """
+    groupes: dict = {}
+    for cid, mid, v, sect, ind, univ in lignes:
+        if not univ or v is None or not math.isfinite(v) or not sect or sect == "Non classé":
+            continue
+        groupes.setdefault(("industrie", ind, mid), []).append(v)
+        groupes.setdefault(("secteur", sect, mid), []).append(v)
+    for k in groupes:
+        groupes[k].sort()
+
+    positions = []
+    for cid, mid, v, sect, ind, univ in lignes:
+        if v is None or not math.isfinite(v) or not sect or sect == "Non classé":
+            continue
+        for niveau, nom in (("industrie", ind), ("secteur", sect)):
+            ref = groupes.get((niveau, nom, mid))
+            if ref and len(ref) >= MIN_GROUPE:
+                positions.append((cid, mid, round(_position(ref, v)), niveau, len(ref)))
+                break
+
+    stats = [(niveau, nom, mid, len(ref), _quantile(ref, .10), _quantile(ref, .25),
+              _quantile(ref, .50), _quantile(ref, .75), _quantile(ref, .90))
+             for (niveau, nom, mid), ref in groupes.items() if len(ref) >= MIN_GROUPE]
+    return positions, stats
+
+
+# =============================================================================
 # EXPORT pour l'interface — python metriques.py > ../web/lib/metriques.json
 # =============================================================================
 AXES = [
