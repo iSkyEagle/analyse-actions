@@ -30,19 +30,15 @@ export default async function ChoixComparaison({ params, searchParams }: {
   const proches = await comparables(s.company_id);
 
   return (
-    <main className="mx-auto max-w-3xl px-5 pb-16 pt-6 sm:px-8">
-      <nav className="flex items-center gap-6">
-        <Link href="/" className="text-sm text-encre-seconde underline underline-offset-4">Accueil</Link>
-        <Link href={`/v/${encodeURIComponent(s.ticker)}`} className="text-sm text-encre-seconde underline underline-offset-4">
-          Fiche {s.ticker}
-        </Link>
-      </nav>
+    <main className="mx-auto max-w-3xl px-5 pb-16 pt-2 sm:px-8">
       <header className="mt-12">
         <p className="text-encre-seconde">Comparaison</p>
         <h1 className="mt-1 text-[2.25rem] font-semibold leading-tight tracking-tight">
           Comparer {s.ticker} à…
         </h1>
-        <p className="mt-2">{s.name}</p>
+        <p className="mt-2">
+          <Link href={`/v/${encodeURIComponent(s.ticker)}`} className="underline underline-offset-4">{s.name}</Link>
+        </p>
       </header>
 
       <div className="mt-8 max-w-md">

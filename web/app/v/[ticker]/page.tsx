@@ -11,11 +11,11 @@
  */
 import Link from "next/link";
 import { notFound, permanentRedirect } from "next/navigation";
-import Recherche from "@/app/composants/Recherche";
 import Graphe from "@/app/composants/Graphe";
 import Metriques from "@/app/composants/Metriques";
 import Synthese from "@/app/composants/Synthese";
 import Comparables from "@/app/composants/Comparables";
+import BoutonSuivre from "@/app/composants/BoutonSuivre";
 import { lienComparaison } from "@/lib/comparaison";
 import { comparables, cours, exercices, historiques, lienEdgar, metriques, notes, series, societe, statsGroupes } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
@@ -47,12 +47,7 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
   const qualite = s.data_quality_score === null ? null : Math.round(s.data_quality_score * 100);
 
   return (
-    <main className="mx-auto max-w-3xl px-5 pb-16 pt-6 sm:px-8">
-      <nav className="flex items-center gap-6">
-        <Link href="/" className="text-sm text-encre-seconde underline underline-offset-4">Accueil</Link>
-        <div className="flex-1"><Recherche /></div>
-      </nav>
-
+    <main className="mx-auto max-w-3xl px-5 pb-16 pt-2 sm:px-8">
       <header className="mt-12">
         <h1 className="text-[2.75rem] font-semibold leading-none tracking-tight">{s.ticker}</h1>
         <p className="mt-3 text-xl">{s.name}</p>
@@ -74,11 +69,12 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
           dernier dépôt le {date(s.last_xbrl_filing)}. {s.exchange}, CIK {s.cik}.
         </p>
         {!horsPerimetre && (
-          <p className="mt-3">
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <BoutonSuivre ticker={s.ticker} />
             <Link href={lienComparaison(s.ticker)} className="underline underline-offset-4">
               Comparer à une autre valeur ou au S&amp;P 500
             </Link>
-          </p>
+          </div>
         )}
       </header>
 

@@ -170,6 +170,29 @@ export async function comparables(companyId: number): Promise<Comparable[]> {
   );
 }
 
+/** Une valeur suivie (étape 6) : de quoi la situer sur l'accueil. */
+export type Suivie = {
+  ticker: string; name: string; market_cap: number | null; globale: number | null; verdict: string | null;
+};
+
+/**
+ * Les valeurs suivies d'un appareil. Liste bornée à 50 par la route d'API ; un seul
+ * tableau en paramètre, texte de requête constant (mémoire, §4).
+ */
+export async function suivies(tickers: string[]): Promise<Suivie[]> {
+  if (tickers.length === 0) return [];
+  return query<Suivie>(
+    `select c.ticker, c.name, c.market_cap,
+            (select s.score from scores s where s.company_id = c.company_id and s.axis = 'globale') as globale,
+            (select split_part(m.raison, '|', 1) from metrics m
+              where m.company_id = c.company_id and m.metric_id = '_verdict_valorisation'
+                and m.value is not null) as verdict
+     from companies c
+     where c.ticker = any($1::text[])`,
+    [tickers],
+  );
+}
+
 export type ResumeHistorique = {
   metric_id: string; couverture: number; p10: number | null; mediane: number | null;
   p90: number | null; mini: number | null; maxi: number | null; as_of: string;

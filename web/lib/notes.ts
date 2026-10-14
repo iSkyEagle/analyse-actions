@@ -29,3 +29,12 @@ export function profilEnMots(notes: Note[]): string | null {
   });
   return mots.length ? majuscule(mots.join(", ")) + "." : null;
 }
+
+/** Verdict de valorisation en quelques mots, pour les listes (accueil, étape 6). */
+export const VERDICT_COURT: Record<string, string> = {
+  parmi_plus_bas: "parmi ses plus basses sur 5 ans",
+  moins_cher: "moins chère que d'habitude",
+  moyenne: "dans sa moyenne",
+  plus_cher: "plus chère que d'habitude",
+  parmi_plus_hauts: "parmi ses plus hautes sur 5 ans",
+};

@@ -57,12 +57,7 @@ export default async function Comparaison({ params }: { params: Promise<{ a: str
   const industriesDifferentes = !bIndice && sa.industry && sb.industry && sa.industry !== sb.industry;
 
   return (
-    <main className="mx-auto max-w-3xl px-5 pb-16 pt-6 sm:px-8">
-      <nav className="flex items-center gap-6">
-        <Link href="/" className="text-sm text-encre-seconde underline underline-offset-4">Accueil</Link>
-        <div className="flex-1"><Recherche /></div>
-      </nav>
-
+    <main className="mx-auto max-w-3xl px-5 pb-16 pt-2 sm:px-8">
       <header className="mt-12">
         <p className="text-encre-seconde">Comparaison</p>
         <h1 className="mt-1 text-[2.25rem] font-semibold leading-tight tracking-tight">
