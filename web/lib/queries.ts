@@ -147,6 +147,29 @@ export async function notes(companyId: number): Promise<Note[]> {
   );
 }
 
+/** Une société comparable (étape 3d), avec de quoi la situer d'un coup d'œil. */
+export type Comparable = {
+  rang: number; niveau: "industrie" | "secteur"; ticker: string; name: string;
+  market_cap: number | null; market_cap_uncertain: boolean;
+  globale: number | null; marge_operationnelle: number | null; cagr_ca_3a: number | null;
+};
+
+/** Les cinq comparables calculées à l'ingestion par comparables.py, dans l'ordre. */
+export async function comparables(companyId: number): Promise<Comparable[]> {
+  return query<Comparable>(
+    `select k.rang, k.niveau, o.ticker, o.name, o.market_cap, o.market_cap_uncertain,
+            (select s.score from scores s where s.company_id = o.company_id and s.axis = 'globale') as globale,
+            (select m.value from metrics m where m.company_id = o.company_id
+                and m.metric_id = 'marge_operationnelle') as marge_operationnelle,
+            (select m.value from metrics m where m.company_id = o.company_id
+                and m.metric_id = 'cagr_ca_3a') as cagr_ca_3a
+     from comparables k join companies o on o.company_id = k.comparable_id
+     where k.company_id = $1
+     order by k.rang`,
+    [companyId],
+  );
+}
+
 export type ResumeHistorique = {
   metric_id: string; couverture: number; p10: number | null; mediane: number | null;
   p90: number | null; mini: number | null; maxi: number | null; as_of: string;

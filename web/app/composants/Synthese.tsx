@@ -168,7 +168,8 @@ export default function Synthese({
                className="grid grid-cols-1 gap-x-6 gap-y-1 border-b border-filet py-4 sm:grid-cols-[8.5rem_1fr]">
             <dt className="flex items-baseline justify-between gap-4 text-encre-seconde sm:block">
               <span>{l.titre}</span>
-              <NoteAxe note={parAxe.get(l.axe)} />
+              <NoteAxe note={parAxe.get(l.axe)}
+                       aucun={aucunApplicable({ axe: l.axe, par, profil, groupes, verdict: code })} />
             </dt>
             <dd>
               <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
@@ -272,10 +273,14 @@ function NoteGlobale({ notes }: { notes: Note[] }) {
   );
 }
 
-function NoteAxe({ note }: { note?: Note }) {
+function NoteAxe({ note, aucun = false }: { note?: Note; aucun?: boolean }) {
   if (!note) return null;
   if (note.score === null) {
-    return (
+    // « Non noté » laisserait croire à une donnée manquante chez une biotech sans chiffre
+    // d'affaires : aucun multiple n'a de sens pour elle, ce n'est pas un manque.
+    return aucun ? (
+      <span className="block text-right text-sm sm:text-left">aucun critère applicable</span>
+    ) : (
       <span className="block text-right text-sm sm:text-left" title={`Critères disponibles : ${note.coverage_pct} %, il en faut la moitié.`}>
         non noté
       </span>
@@ -301,9 +306,21 @@ const SANS_OBJET = new Set<string>(config.sans_objet_note);
  * le groupe de comparaison. Rien n'est recalculé : la note vient de la base, la position
  * aussi ; on montre de quoi elle est faite.
  */
-function Criteres({ axe, par, profil, groupes, verdict }: {
-  axe: Axe; par: Map<string, LigneMetrique>; profil: string; groupes: Groupes; verdict: string;
-}) {
+type ArgsCriteres = { axe: Axe; par: Map<string, LigneMetrique>; profil: string; groupes: Groupes; verdict: string };
+
+/** Vrai si aucun critère de l'axe n'a de sens pour la société (biotech sans chiffre d'affaires). */
+function aucunApplicable(args: ArgsCriteres): boolean {
+  const autres = lignesCriteres(args).filter((r) => r.cle !== "_historique");
+  return autres.every((r) => r.raison?.startsWith("hors calcul"));
+}
+
+function Criteres(args: ArgsCriteres) {
+  const rangs = lignesCriteres(args);
+  if (rangs.length === 0) return null;
+  return <ListeCriteres rangs={rangs} />;
+}
+
+function lignesCriteres({ axe, par, profil, groupes, verdict }: ArgsCriteres) {
   // Même repli que metriques.reference_notee : le premier multiple de référence qui a un
   // sens pour la société. Le multiple écarté reste affiché, hors calcul.
   const liste = (config.reference_valorisation as Record<string, string[]>)[profil] ?? ["per"];
@@ -346,7 +363,10 @@ function Criteres({ axe, par, profil, groupes, verdict }: {
         : p === null ? "groupe de comparaison trop petit" : null,
     }];
   });
-  if (rangs.length === 0) return null;
+  return rangs;
+}
+
+function ListeCriteres({ rangs }: { rangs: ReturnType<typeof lignesCriteres> }) {
   return (
     <details className="group/crit mt-2 text-sm">
       <summary className="cursor-pointer list-none text-encre-seconde underline decoration-dotted underline-offset-4

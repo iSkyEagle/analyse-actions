@@ -1120,3 +1120,59 @@ def ecrire_notes(cn, lignes: list) -> int:
                               where t.company_id = s.company_id and t.axis = s.axis::text)
         """)
         return n + c.rowcount
+
+
+# =============================================================================
+# Étape 3d — sociétés comparables
+# =============================================================================
+def charger_pour_comparables(cn) -> list:
+    """
+    (company_id, cik, profil, secteur, industrie, capitalisation, {critère: valeur})
+    des sociétés de l'univers. Bornée par la taille de l'univers.
+    """
+    import comparables as CP
+    with cn.cursor() as c:
+        c.execute("""
+            select co.company_id, co.cik, co.mapping_profile::text, co.sector, co.industry,
+                   co.market_cap, m.metric_id, m.value
+            from companies co
+            left join metrics m on m.company_id = co.company_id
+                               and m.metric_id = any(%s) and m.value is not null
+            where co.in_universe and co.mapping_profile::text in ('standard', 'financial', 'reit')
+        """, (tableau(list(CP.CRITERES)),))
+        par = {}
+        for cid, cik, prof, sect, ind, cap, mid, v in c.fetchall():
+            f = par.setdefault(cid, [cid, cik, prof, sect, ind, cap, {}])
+            if mid is not None:
+                f[6][mid] = v
+        return [tuple(f) for f in par.values()]
+
+
+def ecrire_comparables(cn, lignes: list) -> int:
+    """Remplace les comparables, en différentiel. `lignes` : (cid, rang, comparable, distance, niveau)."""
+    aujourdhui = date.today()
+    with cn.cursor() as c:
+        c.execute("create temp table if not exists _cmp_stage (company_id smallint, rang smallint, "
+                  "comparable_id smallint, distance real, niveau text) on commit drop")
+        c.execute("truncate _cmp_stage")
+        copier(c, "_cmp_stage", ["company_id", "rang", "comparable_id", "distance", "niveau"], lignes)
+        # La distance seule bouge chaque soir avec les cours : on ne réécrit une ligne que
+        # si la comparable, son rang ou le niveau changent, ou si la distance varie de
+        # plus d'un millième.
+        c.execute("""
+            insert into comparables (company_id, rang, comparable_id, distance, niveau, as_of)
+            select company_id, rang, comparable_id, distance, niveau, %s from _cmp_stage
+            on conflict (company_id, rang) do update set
+              comparable_id = excluded.comparable_id, distance = excluded.distance,
+              niveau = excluded.niveau, as_of = excluded.as_of
+              where comparables.comparable_id <> excluded.comparable_id
+                 or comparables.niveau <> excluded.niveau
+                 or abs(comparables.distance - excluded.distance) > 0.001
+        """, (aujourdhui,))
+        n = c.rowcount
+        c.execute("""
+            delete from comparables k
+            where not exists (select 1 from _cmp_stage t
+                              where t.company_id = k.company_id and t.rang = k.rang)
+        """)
+        return n + c.rowcount

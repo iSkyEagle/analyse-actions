@@ -15,7 +15,8 @@ import Recherche from "@/app/composants/Recherche";
 import Graphe from "@/app/composants/Graphe";
 import Metriques from "@/app/composants/Metriques";
 import Synthese from "@/app/composants/Synthese";
-import { cours, exercices, historiques, lienEdgar, metriques, notes, series, societe, statsGroupes } from "@/lib/queries";
+import Comparables from "@/app/composants/Comparables";
+import { comparables, cours, exercices, historiques, lienEdgar, metriques, notes, series, societe, statsGroupes } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
 
 export const revalidate = 3600;
@@ -29,10 +30,17 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
 
   // Lectures indépendantes, lancées en parallèle : quatre allers-retours enchaînés vers
   // le pooler additionneraient leurs latences.
-  const [fy, points, lignes, pointsSeries, resumes, stats, lesNotes] = await Promise.all([
+  const [fy, points, lignes, pointsSeries, resumes, stats, lesNotes, proches] = await Promise.all([
     exercices(s.cik), cours(s.company_id), metriques(s.company_id), series(s.company_id),
     historiques(s.company_id), statsGroupes(s.industry, s.sector), notes(s.company_id),
+    comparables(s.company_id),
   ]);
+  const valeur = (id: string) => lignes.find((l) => l.metric_id === id)?.value ?? null;
+  const moi = {
+    ticker: s.ticker, name: s.name, market_cap: s.market_cap, market_cap_uncertain: s.market_cap_uncertain,
+    globale: lesNotes.find((n) => n.axis === "globale")?.score ?? null,
+    marge_operationnelle: valeur("marge_operationnelle"), cagr_ca_3a: valeur("cagr_ca_3a"),
+  };
   const groupes = { industrie: s.industry, secteur: s.sector, stats };
   const horsPerimetre = !["standard", "financial", "reit"].includes(s.mapping_profile);
   const qualite = s.data_quality_score === null ? null : Math.round(s.data_quality_score * 100);
@@ -83,6 +91,12 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
         <h2 id="titre-cours" className="sr-only">Cours</h2>
         <Graphe points={points} profondeurVisee={s.history_years} reconstruit={s.prices_rebuilt_at !== null} />
       </section>
+
+      {!horsPerimetre && proches.length > 0 && (
+        <div className="mt-14">
+          <Comparables lignes={proches} moi={moi} groupes={groupes} />
+        </div>
+      )}
 
       {!horsPerimetre && (
         <div className="mt-14">

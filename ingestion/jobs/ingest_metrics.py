@@ -28,6 +28,7 @@ import logging
 import time
 from datetime import date, timedelta
 
+import comparables as CP
 import db
 import metriques as MQ
 import settings
@@ -189,9 +190,15 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
             n = db.ecrire_notes(cn, a_ecrire)
             cn.commit()
             log.info("notes : %d lignes, %d modifiées", len(a_ecrire), n)
+            # Comparables (étape 3d) : les marges et la croissance du jour, la
+            # capitalisation du dernier cours.
+            proches = CP.comparables(db.charger_pour_comparables(cn))
+            n = db.ecrire_comparables(cn, proches)
+            cn.commit()
+            log.info("comparables : %d lignes, %d modifiées", len(proches), n)
         except Exception as e:
             cn.rollback()
-            log.error("percentiles non calculés : %s: %s", type(e).__name__, e)
+            log.error("percentiles, notes ou comparables non calculés : %s: %s", type(e).__name__, e)
 
     log.info("%d sociétés calculées en %.1f s (%s)", ok, time.monotonic() - debut,
              "complet, cinq ans de cours" if complet else "quotidien, treize mois de cours")
