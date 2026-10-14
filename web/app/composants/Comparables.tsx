@@ -21,20 +21,26 @@ export default function Comparables({ lignes, moi, groupes }: {
   lignes: Comparable[]; moi: Ligne; groupes: Groupes;
 }) {
   if (lignes.length === 0) return null;
-  const niveau = lignes[0].niveau;
-  const groupe = nomGroupe(niveau, groupes);
+  const industrie = (groupes.industrie ?? "").toLowerCase();
+  const nIndustrie = lignes.filter((l) => l.niveau === "industrie").length;
+  const secteur = nomGroupe("secteur", groupes);
+  const critere = "choisies d'abord par la taille, ensuite par la marge brute, la marge opérationnelle "
+    + "et la croissance du chiffre d'affaires.";
+  // Trois cas : l'industrie suffit ; elle est trop petite et ses membres passent d'abord,
+  // complétés par le secteur ; elle ne compte aucune autre société suivie.
+  const phrase = nIndustrie === lignes.length
+    ? `Même industrie (${industrie}), ${critere}`
+    : nIndustrie > 0
+      ? `${nIndustrie === 1 ? "La seule autre société" : `Les ${nIndustrie} autres sociétés`} de l'industrie (${industrie}), `
+        + `${nIndustrie === 1 ? "complétée" : "complétées"} par les plus proches du ${secteur}, ${critere}`
+      : `Aucune autre société suivie dans l'industrie (${industrie}) : les plus proches du ${secteur}, ${critere}`;
   return (
     <section aria-labelledby="titre-comparables">
       <div className="border-b border-filet pb-2">
         <h2 id="titre-comparables" className="text-xl font-semibold">Sociétés comparables</h2>
       </div>
       <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-encre-seconde">
-        {niveau === "industrie"
-          ? <>Même industrie ({groupe})</>
-          : <>Même {groupe} : l'industrie ({(groupes.industrie ?? "").toLowerCase()}) compte moins de
-              six sociétés suivies</>}
-        , choisies d'abord par la taille, puis par la marge brute, la marge opérationnelle et
-        la croissance du chiffre d'affaires.
+        {phrase}
       </p>
       {/* Téléphone : une fiche par société plutôt qu'un tableau de cinq colonnes qui
           déborde. Les mêmes chiffres, dans le même ordre. */}

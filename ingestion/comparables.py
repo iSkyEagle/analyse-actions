@@ -5,8 +5,10 @@ Pour chaque société de l'univers, les cinq sociétés les plus proches, calcul
 soir avec les percentiles et les notes. L'interface ne fait que lire.
 
 Candidates : les sociétés de l'univers de la même industrie ET du même profil (une
-banque ne se compare pas à une foncière). Sous six sociétés dans l'industrie, on élargit
-au secteur. Une société n'est jamais sa propre comparable, ni ses autres catégories
+banque ne se compare pas à une foncière). Sous six sociétés dans l'industrie, ses
+membres passent d'abord, et le secteur complète la liste (corrigé le 14 octobre 2026 :
+noyées dans tout le secteur technologie, D-Wave, Rigetti et Quantum Computing
+disparaissaient des comparables d'IonQ au profit d'éditeurs de logiciels). Une société n'est jamais sa propre comparable, ni ses autres catégories
 d'actions (même CIK : GOOG pour GOOGL).
 
 Proximité : une distance sur quatre critères, décidée le 14 octobre 2026.
@@ -105,20 +107,23 @@ def comparables(societes: list) -> list:
             if m == cid or (f["cik"] is not None and fiches[m]["cik"] == f["cik"]):
                 continue
             autre = {"taille": fiches[m]["taille"], "rangs": {c: rg[c].get(m) for c in CRITERES}}
-            candidates.append((_distance(moi, autre), m))
+            # Repli sur le secteur : la même industrie passe d'abord, quelle que soit la
+            # distance. Le niveau de chaque ligne dit d'où vient la comparable.
+            meme = fiches[m]["industrie"] == f["industrie"]
+            candidates.append((0 if meme else 1, _distance(moi, autre), m))
         # Égalités départagées par l'identifiant : le résultat ne dépend pas de l'ordre
         # de lecture, sinon la garde différentielle réécrirait des lignes chaque soir.
         candidates.sort()
         retenues, ciks = [], set()
-        for d, m in candidates:
+        for priorite, d, m in candidates:
             # Deux catégories d'actions d'une même société ne prennent qu'une place.
             ck = fiches[m]["cik"]
             if ck is not None and ck in ciks:
                 continue
             ciks.add(ck)
-            retenues.append((d, m))
+            retenues.append((d, m, "industrie" if priorite == 0 else "secteur"))
             if len(retenues) == NOMBRE:
                 break
-        for rang, (d, m) in enumerate(retenues, start=1):
-            out.append((cid, rang, m, round(d, 4), niveau))
+        for rang, (d, m, niv) in enumerate(retenues, start=1):
+            out.append((cid, rang, m, round(d, 4), niv))
     return out
