@@ -28,7 +28,22 @@ function chargerIndex(): Promise<Entree[]> {
   return chargement;
 }
 
-export default function Recherche({ autoFocus = false }: { autoFocus?: boolean }) {
+export default function Recherche({
+  autoFocus = false,
+  action = "/v",
+  prefixe = "/v/",
+  libelle = "Rechercher une valeur par ticker ou par nom",
+  indication = "Ticker ou nom de société",
+}: {
+  autoFocus?: boolean;
+  /** Cible du formulaire sans JavaScript : reçoit le ticker saisi dans le paramètre `t`. */
+  action?: string;
+  /** Destination d'une suggestion : la fiche (/v/), ou la comparaison (/comparer/MSFT/).
+   *  Une chaîne et non une fonction : un composant serveur ne peut pas passer de fonction. */
+  prefixe?: string;
+  libelle?: string;
+  indication?: string;
+}) {
   const router = useRouter();
   const idListe = useId();
   const [valeur, setValeur] = useState("");
@@ -56,7 +71,7 @@ export default function Recherche({ autoFocus = false }: { autoFocus?: boolean }
 
   const ouvrir = (ticker: string) => {
     setOuvert(false);
-    router.push(`/v/${encodeURIComponent(ticker)}`);
+    router.push(prefixe + encodeURIComponent(ticker));
   };
 
   const auClavier = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -79,8 +94,8 @@ export default function Recherche({ autoFocus = false }: { autoFocus?: boolean }
   };
 
   return (
-    <form action="/v" method="get" role="search" className="relative">
-      <label htmlFor={`${idListe}-champ`} className="sr-only">Rechercher une valeur par ticker ou par nom</label>
+    <form action={action} method="get" role="search" className="relative">
+      <label htmlFor={`${idListe}-champ`} className="sr-only">{libelle}</label>
       <input
         ref={champ}
         id={`${idListe}-champ`}
@@ -89,7 +104,7 @@ export default function Recherche({ autoFocus = false }: { autoFocus?: boolean }
         autoComplete="off"
         spellCheck={false}
         autoFocus={autoFocus}
-        placeholder="Ticker ou nom de société"
+        placeholder={indication}
         value={valeur}
         onFocus={precharger}
         onChange={(e) => {

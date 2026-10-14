@@ -20,6 +20,7 @@ import config from "@/lib/metriques.json";
 import { date, metrique } from "@/lib/format";
 import type { LigneMetrique, Note, ResumeHistorique } from "@/lib/queries";
 import { nomGroupe, phrasePosition, type Groupes } from "@/lib/groupes";
+import { majuscule, motProfil, ORDRE_PROFIL, surDix, type Axe } from "@/lib/notes";
 import RegleHistorique, { regleAffichable } from "./RegleHistorique";
 
 const VERDICTS: Record<string, string> = {
@@ -37,7 +38,6 @@ const LIBELLE_COURT: Record<string, string> = {
   prix_ffo: "prix sur FFO",
 };
 
-type Axe = "valorisation" | "qualite" | "croissance" | "dilution";
 type Ligne = {
   axe: Axe; titre: string; phrase: string; detail?: string; comparaison?: string | null;
   perte?: boolean; regle?: React.ReactNode;
@@ -191,21 +191,8 @@ export default function Synthese({
 
 // --- Notes : composants -------------------------------------------------------------
 
-const ORDRE_PROFIL: Axe[] = ["qualite", "valorisation", "croissance", "dilution"];
-const MOTS = config.profil_mots as Record<Axe, [string, string, string]>;
-const [SEUIL_BAS, SEUIL_HAUT] = config.seuils_mots as [number, number];
-
-const majuscule = (t: string) => t.replace(/^./, (c) => c.toUpperCase());
-const surDix = (score: number) => Math.round(score / 10);
-
-/** Mots du profil, sur la note précise (sur 100) : 6,4 reste « dans la moyenne ». */
-function motProfil(axe: Axe, score: number): string {
-  const n = score / 10;
-  return MOTS[axe][n < SEUIL_BAS ? 0 : n >= SEUIL_HAUT ? 2 : 1];
-}
-
 /** Dix cases à l'encre : une position sur une échelle, sans couleur qui juge. */
-function Jauge({ note }: { note: number }) {
+export function Jauge({ note }: { note: number }) {
   return (
     <span aria-hidden className="inline-flex gap-[3px]">
       {Array.from({ length: 10 }, (_, i) => (

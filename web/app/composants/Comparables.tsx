@@ -13,6 +13,7 @@
 import Link from "next/link";
 import { dollars, metrique } from "@/lib/format";
 import type { Comparable } from "@/lib/queries";
+import { lienComparaison } from "@/lib/comparaison";
 import { nomGroupe, type Groupes } from "@/lib/groupes";
 
 type Ligne = Omit<Comparable, "rang" | "niveau">;
@@ -45,8 +46,8 @@ export default function Comparables({ lignes, moi, groupes }: {
       {/* Téléphone : une fiche par société plutôt qu'un tableau de cinq colonnes qui
           déborde. Les mêmes chiffres, dans le même ordre. */}
       <ul className="mt-2 sm:hidden">
-        <Fiche l={moi} soi />
-        {lignes.map((l) => <Fiche key={l.ticker} l={l} />)}
+        <Fiche l={moi} soi base={moi.ticker} />
+        {lignes.map((l) => <Fiche key={l.ticker} l={l} base={moi.ticker} />)}
       </ul>
       <div className="mt-2 hidden sm:block">
         <table className="w-full text-sm">
@@ -60,8 +61,8 @@ export default function Comparables({ lignes, moi, groupes }: {
             </tr>
           </thead>
           <tbody>
-            <Rangee l={moi} soi />
-            {lignes.map((l) => <Rangee key={l.ticker} l={l} />)}
+            <Rangee l={moi} soi base={moi.ticker} />
+            {lignes.map((l) => <Rangee key={l.ticker} l={l} base={moi.ticker} />)}
           </tbody>
         </table>
       </div>
@@ -69,7 +70,7 @@ export default function Comparables({ lignes, moi, groupes }: {
   );
 }
 
-function Fiche({ l, soi = false }: { l: Ligne; soi?: boolean }) {
+function Fiche({ l, soi = false, base }: { l: Ligne; soi?: boolean; base: string }) {
   const perte = l.marge_operationnelle !== null && l.marge_operationnelle < 0;
   return (
     <li className={`px-2 py-3 text-sm ${soi ? "border-b border-filet" : "odd:bg-bande"}`}>
@@ -80,6 +81,11 @@ function Fiche({ l, soi = false }: { l: Ligne; soi?: boolean }) {
           </Link>
         )}
         <span className="truncate text-encre-seconde">{soi ? "cette société" : l.name}</span>
+        {!soi && (
+          <Link href={lienComparaison(base, l.ticker)} className="ml-auto shrink-0 text-encre-seconde underline underline-offset-4">
+            Comparer
+          </Link>
+        )}
       </p>
       <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 tabular-nums">
         <dt className="text-encre-seconde">Capitalisation</dt>
@@ -102,7 +108,7 @@ function Fiche({ l, soi = false }: { l: Ligne; soi?: boolean }) {
   );
 }
 
-function Rangee({ l, soi = false }: { l: Ligne; soi?: boolean }) {
+function Rangee({ l, soi = false, base }: { l: Ligne; soi?: boolean; base: string }) {
   const perte = l.marge_operationnelle !== null && l.marge_operationnelle < 0;
   return (
     <tr className={soi ? "border-b border-filet font-semibold" : "odd:bg-bande"}>
@@ -112,6 +118,12 @@ function Rangee({ l, soi = false }: { l: Ligne; soi?: boolean }) {
         ) : (
           <Link href={`/v/${encodeURIComponent(l.ticker)}`} className="underline underline-offset-4">
             {l.ticker}
+          </Link>
+        )}
+        {!soi && (
+          <Link href={lienComparaison(base, l.ticker)}
+                className="ml-2 text-xs text-encre-seconde underline underline-offset-4">
+            comparer
           </Link>
         )}
         {!soi && <span className="block max-w-[22ch] truncate text-encre-seconde sm:max-w-[30ch]">{l.name}</span>}

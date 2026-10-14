@@ -504,20 +504,8 @@ def calculer(exercices: list, trimestres: list, cours: list, capitalisation: Opt
                 pose(m.id, v, raison)
 
     # --- risque : cours -----------------------------------------------------------
-    closes = [c for _, c in cours if c and c > 0]
-    if len(closes) >= 200:
-        an = closes[-252:]
-        rend = [math.log(b / a) for a, b in zip(an, an[1:])]
-        pose("volatilite_1a", pstdev(rend) * math.sqrt(252))
-        pose("distance_plus_haut_52s", an[-1] / max(an) - 1)
-        pic, pire = closes[-1260:][0], 0.0
-        for c in closes[-1260:]:
-            pic = max(pic, c)
-            pire = min(pire, c / pic - 1)
-        pose("drawdown_max_5a", pire)
-    else:
-        for mid in ("volatilite_1a", "distance_plus_haut_52s", "drawdown_max_5a"):
-            pose(mid, None, "moins d'un an de cours")
+    for mid, (v, raison) in risque_cours(cours).items():
+        pose(mid, v, raison)
 
     # --- rendement total, écart au S&P 500, bêta -----------------------------------
     if indice:
@@ -535,6 +523,42 @@ def calculer(exercices: list, trimestres: list, cours: list, capitalisation: Opt
             pose(mid, None, "indice de référence indisponible")
 
     res["_base_12_mois"] = (None, source_ttm)
+    return res
+
+
+def risque_cours(cours: list) -> dict:
+    """Volatilité, écart au plus haut et pire baisse, sur les clôtures ajustées."""
+    closes = [c for _, c in cours if c and c > 0]
+    if len(closes) < 200:
+        return {mid: (None, "moins d'un an de cours")
+                for mid in ("volatilite_1a", "distance_plus_haut_52s", "drawdown_max_5a")}
+    an = closes[-252:]
+    rend = [math.log(b / a) for a, b in zip(an, an[1:])]
+    pic, pire = closes[-1260:][0], 0.0
+    for c in closes[-1260:]:
+        pic = max(pic, c)
+        pire = min(pire, c / pic - 1)
+    return {"volatilite_1a": (pstdev(rend) * math.sqrt(252), None),
+            "distance_plus_haut_52s": (an[-1] / max(an) - 1, None),
+            "drawdown_max_5a": (pire, None)}
+
+
+# Mesures de cours du S&P 500, pour la comparaison d'une valeur à l'indice (étape 5).
+# Les mêmes formules que pour une société : le risque sur l'indice de prix (^GSPC), comme
+# le cours d'une société ajusté des seules divisions ; le rendement total sur l'indice
+# dividendes réinvestis (^SP500TR), comme celui d'une société. Le bêta de l'indice face à
+# lui-même vaut 1 par définition.
+MESURES_INDICE = ("volatilite_1a", "distance_plus_haut_52s", "drawdown_max_5a",
+                  "rendement_total_1a", "rendement_total_3a", "rendement_total_5a", "beta_5a")
+
+
+def mesures_indice(cours_prix: list, cours_rt: list) -> dict:
+    res = risque_cours(cours_prix)
+    for n in (1, 3, 5):
+        v = performance_annualisee(cours_rt, n) if cours_rt else None
+        res[f"rendement_total_{n}a"] = (v, None if v is not None
+                                        else f"moins de {n} an{'s' if n > 1 else ''} de cours")
+    res["beta_5a"] = (1.0, None)
     return res
 
 

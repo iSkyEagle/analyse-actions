@@ -163,6 +163,23 @@ def run(tickers: list | None = None, complet: bool = False) -> int:
 
     # Percentiles : une fois toutes les métriques écrites, chaque société est située dans
     # son groupe. Chaque soir — les multiples bougent avec les cours.
+    # Mesures de cours du S&P 500 (étape 5) : la comparaison d'une valeur à l'indice lit
+    # les mêmes métriques que pour une société. Cinq ans de cours des deux indices, chaque
+    # soir : deux séries de 1 300 séances, négligeable.
+    if not tickers:
+        try:
+            gspc, rt = db.id_indice(cn, "^GSPC"), db.id_indice(cn)
+            if gspc and rt:
+                c5 = db.charger_cours(cn, [gspc, rt], aujourdhui - PROFONDEUR_COMPLETE)
+                mes = MQ.mesures_indice(c5.get(gspc, []), c5.get(rt, []))
+                db.ecrire_metriques(cn, [gspc], [(gspc, aujourdhui, mid, v, raison)
+                                                 for mid, (v, raison) in mes.items()], [])
+                cn.commit()
+                log.info("S&P 500 : %d mesures de cours", sum(v is not None for v, _ in mes.values()))
+        except Exception as e:
+            cn.rollback()
+            log.error("mesures du S&P 500 non calculées : %s: %s", type(e).__name__, e)
+
     if not tickers:
         try:
             lignes_pct = db.charger_pour_percentiles(cn)

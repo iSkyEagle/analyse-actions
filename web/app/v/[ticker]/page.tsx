@@ -16,6 +16,7 @@ import Graphe from "@/app/composants/Graphe";
 import Metriques from "@/app/composants/Metriques";
 import Synthese from "@/app/composants/Synthese";
 import Comparables from "@/app/composants/Comparables";
+import { lienComparaison } from "@/lib/comparaison";
 import { comparables, cours, exercices, historiques, lienEdgar, metriques, notes, series, societe, statsGroupes } from "@/lib/queries";
 import { actions, date, dollars, nombre } from "@/lib/format";
 
@@ -72,6 +73,13 @@ export default async function FicheValeur({ params }: { params: Promise<{ ticker
           {qualite !== null && <>Données complètes à {qualite} % sur {s.fiscal_years_available ?? 0} exercices, </>}
           dernier dépôt le {date(s.last_xbrl_filing)}. {s.exchange}, CIK {s.cik}.
         </p>
+        {!horsPerimetre && (
+          <p className="mt-3">
+            <Link href={lienComparaison(s.ticker)} className="underline underline-offset-4">
+              Comparer à une autre valeur ou au S&amp;P 500
+            </Link>
+          </p>
+        )}
       </header>
 
       {horsPerimetre && (
